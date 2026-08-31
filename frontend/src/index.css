@@ -1,0 +1,336 @@
+/* ===========================================================================
+   AI Traceability Engine — Design System
+   Tailwind v4 (CSS-first). Identity: pure-black canvas, neon-minimal
+   cyan-to-emerald accents, glass surfaces, noise texture, glow over flat.
+   =========================================================================== */
+
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   1. DESIGN TOKENS
+   Every token here auto-generates utilities (bg-*, text-*, border-*, ...).
+   --------------------------------------------------------------------------- */
+@theme {
+  /* Typography */
+  --font-sans: "Inter", "SF Pro Display", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Editorial display scale — for the huge landing typography */
+  --text-display-sm: 2.75rem;
+  --text-display-sm--line-height: 1.02;
+  --text-display-md: 4rem;
+  --text-display-md--line-height: 0.98;
+  --text-display-lg: 5.5rem;
+  --text-display-lg--line-height: 0.94;
+  --text-display-xl: 7.5rem;
+  --text-display-xl--line-height: 0.9;
+
+  /* Surfaces: near-black, not "dark gray" */
+  --color-surface-950: #000000;
+  --color-surface-900: #050506;
+  --color-surface-800: #0a0b0d;
+  --color-surface-700: #141518;
+  --color-surface-600: #1f2125;
+  --color-surface-500: #2b2e34;
+
+  /* Brand: cyan-forward retint of the old blue ramp, so every existing
+     dashboard component inherits the new identity with zero code changes. */
+  --color-brand-50:  #ecfeff;
+  --color-brand-100: #cffafe;
+  --color-brand-200: #a5f3fc;
+  --color-brand-300: #67e8f9;
+  --color-brand-400: #22d3ee;
+  --color-brand-500: #06b6d4;
+  --color-brand-600: #0891b2;
+  --color-brand-700: #0e7490;
+  --color-brand-900: #164e63;
+
+  /* Neon accents */
+  --color-neon-cyan:    #22d3ee;
+  --color-neon-emerald: #34d399;
+  --color-neon-amber:   #fbbf24;
+  --color-neon-rose:    #fb7185;
+
+  /* Semantic compliance colours */
+  --color-compliant:    #34d399;
+  --color-partial:      #fbbf24;
+  --color-noncompliant: #fb7185;
+
+  /* Motion */
+  --animate-float:      float 7s ease-in-out infinite;
+  --animate-pulse-slow: pulse 3.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-glow:       glow 2.4s ease-in-out infinite alternate;
+  --animate-shimmer:    shimmer 2.4s linear infinite;
+  --animate-marquee:    marquee 38s linear infinite;
+  --animate-aurora:     aurora 14s ease-in-out infinite alternate;
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-10px); }
+  }
+  @keyframes glow {
+    from { opacity: 0.35; }
+    to   { opacity: 0.85; }
+  }
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
+  }
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+  @keyframes aurora {
+    0%   { transform: translate3d(-6%, -3%, 0) scale(1);  opacity: 0.5; }
+    100% { transform: translate3d(6%, 4%, 0) scale(1.18); opacity: 0.85; }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   2. BASE
+   --------------------------------------------------------------------------- */
+@layer base {
+  :root {
+    /* Film-grain tile. Quotes are %27-encoded so the URI stays quote-free. */
+    --noise-svg: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27140%27 height=%27140%27%3E%3Cfilter id=%27n%27%3E%3CfeTurbulence type=%27fractalNoise%27 baseFrequency=%270.85%27 numOctaves=%274%27 stitchTiles=%27stitch%27/%3E%3C/filter%3E%3Crect width=%27100%25%27 height=%27100%25%27 filter=%27url(%23n)%27/%3E%3C/svg%3E");
+  }
+
+  * { box-sizing: border-box; }
+
+  html {
+    /* Lenis drives scrolling — native smooth-scroll must be off or they fight */
+    scroll-behavior: auto;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-surface-950);
+    color: white;
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01", "ss03";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  /* Optical tightening — big type needs negative tracking to read as designed */
+  h1, h2, h3 { letter-spacing: -0.035em; text-wrap: balance; }
+  p { text-wrap: pretty; }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-neon-cyan) 30%, transparent);
+    color: #fff;
+  }
+
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: var(--color-surface-900); }
+  ::-webkit-scrollbar-thumb { background: var(--color-surface-600); border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-surface-500); }
+
+  canvas { outline: none; display: block; }
+
+  /* Lenis */
+  html.lenis, html.lenis body { height: auto; }
+  .lenis.lenis-smooth { scroll-behavior: auto !important; }
+  .lenis.lenis-stopped { overflow: hidden; }
+
+  /* Respect the OS setting — kill every non-essential animation */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   3. COMPONENTS
+   --------------------------------------------------------------------------- */
+/* Glass surfaces are declared as @utility (not @layer components) so that
+   component classes below can consume them via @apply — in Tailwind v4,
+   @apply only accepts utilities. */
+@utility glass {
+  background: rgba(255, 255, 255, 0.028);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+@utility glass-strong {
+  background: rgba(255, 255, 255, 0.055);
+  backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+}
+
+/* Hairline top-edge highlight — the detail that reads as expensive */
+@utility glass-edge {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+    pointer-events: none;
+  }
+}
+
+@layer components {
+  .metric-card {
+    @apply glass glass-edge rounded-2xl p-5 flex flex-col gap-1 transition-all duration-300
+           hover:border-brand-400/30;
+  }
+
+  /* Badges */
+  .badge-compliant {
+    @apply text-[11px] font-semibold px-2 py-0.5 rounded-full bg-compliant/15 text-compliant ring-1 ring-compliant/25;
+  }
+  .badge-partial {
+    @apply text-[11px] font-semibold px-2 py-0.5 rounded-full bg-partial/15 text-partial ring-1 ring-partial/25;
+  }
+  .badge-noncompliant {
+    @apply text-[11px] font-semibold px-2 py-0.5 rounded-full bg-noncompliant/15 text-noncompliant ring-1 ring-noncompliant/25;
+  }
+
+  /* Nav */
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium
+           text-white/45 hover:text-white hover:bg-white/5
+           transition-all duration-200 cursor-pointer;
+  }
+  .nav-item.active {
+    @apply text-white bg-brand-400/10 ring-1 ring-brand-400/25;
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply relative inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl
+           font-semibold text-sm text-surface-950 bg-white
+           transition-all duration-200 will-change-transform
+           hover:-translate-y-px active:translate-y-0
+           disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:translate-y-0;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl
+           font-semibold text-sm text-white glass
+           hover:bg-white/10 hover:border-white/20
+           transition-all duration-200 disabled:opacity-45;
+  }
+
+  /* Form */
+  .input {
+    @apply w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5
+           text-sm text-white placeholder-white/30 outline-none
+           focus:border-brand-400/60 focus:bg-white/5
+           focus:ring-2 focus:ring-brand-400/20
+           transition-all duration-200;
+  }
+
+  .code-block {
+    @apply bg-surface-900 border border-white/5 rounded-xl p-4
+           font-mono text-xs text-white/70 overflow-x-auto;
+  }
+
+  /* Kicker / eyebrow label */
+  .kicker {
+    @apply inline-flex items-center gap-2 text-[11px] font-semibold uppercase
+           tracking-[0.2em] text-white/40;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   4. UTILITIES
+   --------------------------------------------------------------------------- */
+
+/* Gradient text — cyan to emerald, deliberately NOT a purple SaaS gradient */
+@utility gradient-text {
+  background-image: linear-gradient(105deg, #ffffff 8%, var(--color-neon-cyan) 48%, var(--color-neon-emerald) 88%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Film-grain noise overlay — kills banding on dark gradients */
+@utility noise {
+  position: relative;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.03;
+    mix-blend-mode: overlay;
+    background-image: var(--noise-svg);
+  }
+}
+
+/* Engineering grid backdrop */
+@utility grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+/* Radial fade mask — grids and edges must dissolve, never hard-stop */
+@utility mask-fade {
+  mask-image: radial-gradient(ellipse 78% 62% at 50% 40%, #000 42%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 78% 62% at 50% 40%, #000 42%, transparent 100%);
+}
+@utility mask-fade-b {
+  mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+}
+
+/* Neon glows */
+@utility glow-cyan {
+  box-shadow: 0 0 28px -6px color-mix(in oklab, var(--color-neon-cyan) 55%, transparent);
+}
+@utility glow-emerald {
+  box-shadow: 0 0 28px -6px color-mix(in oklab, var(--color-neon-emerald) 55%, transparent);
+}
+@utility glow-rose {
+  box-shadow: 0 0 28px -6px color-mix(in oklab, var(--color-neon-rose) 55%, transparent);
+}
+@utility glow-blue {
+  box-shadow: 0 0 28px -6px color-mix(in oklab, var(--color-brand-400) 55%, transparent);
+}
+@utility glow-green {
+  box-shadow: 0 0 28px -6px color-mix(in oklab, var(--color-compliant) 55%, transparent);
+}
+@utility glow-red {
+  box-shadow: 0 0 28px -6px color-mix(in oklab, var(--color-noncompliant) 55%, transparent);
+}
+@utility glow-amber {
+  box-shadow: 0 0 28px -6px color-mix(in oklab, var(--color-partial) 55%, transparent);
+}
+
+/* Hero radial glow (replaces the v3 backgroundImage config token) */
+@utility bg-hero-glow {
+  background-image: radial-gradient(ellipse at 50% 0%, color-mix(in oklab, var(--color-neon-cyan) 14%, transparent) 0%, transparent 70%);
+}
+@utility bg-gradient-radial {
+  background-image: radial-gradient(var(--tw-gradient-stops));
+}
+
+/* Spinner */
+@utility spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid color-mix(in oklab, var(--color-brand-400) 22%, transparent);
+  border-top-color: var(--color-brand-400);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Tabular figures — data must never jitter while animating */
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

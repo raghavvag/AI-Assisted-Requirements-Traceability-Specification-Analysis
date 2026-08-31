@@ -1,0 +1,213 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Aurora Digital Banking Platform API",
+    "description": "REST API specification for the Aurora Digital Banking Platform, version 2.0. This release simplifies the transfer contract and retires the step-up authentication flow. Both changes reduce compliance with the approved SRS baseline.",
+    "version": "2.0.0"
+  },
+  "servers": [{ "url": "https://api.aurora-bank.example.com", "description": "Production" }],
+  "paths": {
+    "/api/v2/auth/login": {
+      "post": {
+        "operationId": "authLogin",
+        "summary": "Authenticate customer and issue a bound session token",
+        "description": "Validates the customer identifier and passcode against the salted password hash and issues a signed JWT access token with configurable expiry. Returns a unique session_id and a device_binding_id linking the session to a registered device fingerprint for revocation and audit. Satisfies BNK-REQ-01.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["customer_id", "passcode", "device_fingerprint"], "properties": {
+            "customer_id": { "type": "string", "description": "Registered retail banking customer identifier" },
+            "passcode": { "type": "string", "description": "Customer passcode, transmitted over TLS and verified against a salted hash" },
+            "device_fingerprint": { "type": "string", "description": "Stable fingerprint of the calling device, used for device binding" }
+          } } } }
+        },
+        "responses": { "200": { "description": "Authentication successful. Returns a signed JWT access token, its expiry, a unique session_id and the device_binding_id for this device.", "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "access_token": { "type": "string", "description": "Signed JWT access token" },
+          "expires_in": { "type": "integer", "description": "Token lifetime in seconds" },
+          "session_id": { "type": "string", "description": "Unique session identifier enabling revocation and audit trail generation" },
+          "device_binding_id": { "type": "string", "description": "Identifier binding this session to the registered device" }
+        } } } } } }
+      }
+    },
+    "/api/v2/auth/logout": {
+      "post": {
+        "operationId": "authLogout",
+        "summary": "Revoke the active session",
+        "description": "Invalidates the supplied session_id so the JWT can no longer be used, and writes a session revocation entry to the audit trail. Satisfies BNK-REQ-01.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "session_id": { "type": "string", "description": "Session identifier to revoke" }
+        } } } } },
+        "responses": { "200": { "description": "Session revoked and audit entry written." } }
+      }
+    },
+    "/api/v2/accounts": {
+      "get": {
+        "operationId": "listAccounts",
+        "summary": "List all accounts owned by the authenticated customer",
+        "description": "Returns every account belonging to the authenticated customer with its type, currency, available balance and ledger balance. Satisfies BNK-REQ-02.",
+        "responses": { "200": { "description": "Array of account records for the customer.", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object", "properties": {
+          "account_id": { "type": "string", "description": "Unique account identifier" },
+          "account_type": { "type": "string", "description": "Account product type, for example savings or current" },
+          "currency": { "type": "string", "description": "ISO 4217 account currency code" },
+          "available_balance": { "type": "number", "description": "Balance available to spend right now" },
+          "ledger_balance": { "type": "number", "description": "Posted ledger balance including uncleared items" }
+        } } } } } } }
+      }
+    },
+    "/api/v2/accounts/{account_id}/statement": {
+      "get": {
+        "operationId": "getAccountStatement",
+        "summary": "Retrieve a paginated transaction statement for one account",
+        "description": "Returns the posted transaction lines for a single account over a date range, with pagination. Each line carries the transaction identifier, posting date, description, amount and running balance. Satisfies BNK-REQ-02.",
+        "parameters": [
+          { "name": "account_id", "in": "path", "required": true, "description": "Account to produce the statement for" },
+          { "name": "from_date", "in": "query", "description": "Inclusive start of the statement period, ISO 8601 date" },
+          { "name": "to_date", "in": "query", "description": "Inclusive end of the statement period, ISO 8601 date" },
+          { "name": "page", "in": "query", "description": "Page number for pagination" },
+          { "name": "page_size", "in": "query", "description": "Number of transaction lines per page" }
+        ],
+        "responses": { "200": { "description": "Paginated statement lines.", "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "transactions": { "type": "array", "items": { "type": "object", "properties": {
+            "transaction_id": { "type": "string", "description": "Unique transaction identifier" },
+            "posting_date": { "type": "string", "description": "ISO 8601 posting timestamp" },
+            "description": { "type": "string", "description": "Narrative shown on the statement" },
+            "amount": { "type": "number", "description": "Signed transaction amount" },
+            "running_balance": { "type": "number", "description": "Account balance after this transaction posted" }
+          } } }
+        } } } } } }
+      }
+    },
+    "/api/v2/beneficiaries": {
+      "get": {
+        "operationId": "listBeneficiaries",
+        "summary": "List registered payment beneficiaries",
+        "description": "Returns every payment beneficiary registered by the authenticated customer together with its activation status and cooling period state. Satisfies BNK-REQ-03.",
+        "responses": { "200": { "description": "Array of registered beneficiaries with activation_status and cooling_period.", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object", "properties": {
+          "beneficiary_id": { "type": "string", "description": "Server-assigned beneficiary identifier" },
+          "beneficiary_name": { "type": "string", "description": "Registered name of the payee" },
+          "account_number": { "type": "string", "description": "Destination account number" },
+          "ifsc_code": { "type": "string", "description": "Destination bank branch routing code" },
+          "activation_status": { "type": "string", "description": "Whether the beneficiary is active or still in cooling_period" }
+        } } } } } } }
+      },
+      "post": {
+        "operationId": "createBeneficiary",
+        "summary": "Register a new payment beneficiary",
+        "description": "Registers a new payment beneficiary. The new beneficiary enters a cooling_period state and cannot be used as a transfer destination until that period has elapsed. Satisfies BNK-REQ-03.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["beneficiary_name", "account_number", "ifsc_code"], "properties": {
+          "beneficiary_name": { "type": "string", "description": "Name of the payee to register" },
+          "account_number": { "type": "string", "description": "Destination account number" },
+          "ifsc_code": { "type": "string", "description": "Destination bank branch routing code" }
+        } } } } },
+        "responses": { "201": { "description": "Beneficiary registered. Returns the server-assigned beneficiary_id and an activation_status of cooling_period.", "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "beneficiary_id": { "type": "string", "description": "Server-assigned beneficiary identifier" },
+          "activation_status": { "type": "string", "description": "Set to cooling_period until the beneficiary becomes usable" }
+        } } } } } }
+      }
+    },
+    "/api/v2/beneficiaries/{beneficiary_id}": {
+      "delete": {
+        "operationId": "deleteBeneficiary",
+        "summary": "Delete a registered payment beneficiary",
+        "description": "Removes a payment beneficiary from the registered beneficiary list of the authenticated customer so it can no longer be selected as a transfer destination. Satisfies BNK-REQ-03.",
+        "parameters": [{ "name": "beneficiary_id", "in": "path", "required": true, "description": "Beneficiary to delete" }],
+        "responses": { "200": { "description": "Beneficiary deleted from the registered list." } }
+      }
+    },
+    "/api/v2/transfers": {
+      "post": {
+        "operationId": "createTransfer",
+        "summary": "Submit a fund transfer",
+        "description": "Debits the source account and credits a registered beneficiary. The platform now assigns a server-generated reference_number to each submission, so the client no longer supplies a key of its own. Satisfies BNK-REQ-04.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["source_account_id", "beneficiary_id", "amount"], "properties": {
+          "source_account_id": { "type": "string", "description": "Account to debit" },
+          "beneficiary_id": { "type": "string", "description": "Registered destination beneficiary" },
+          "amount": { "type": "number", "description": "Transfer amount in account currency" },
+          "remarks": { "type": "string", "description": "Free-text narrative shown on both statements" }
+        } } } } },
+        "responses": { "201": { "description": "Transfer accepted. Returns the transfer_id and a server-generated reference_number.", "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "transfer_id": { "type": "string", "description": "Unique identifier of the accepted transfer" },
+          "reference_number": { "type": "string", "description": "Server-generated reference assigned at submission time" },
+          "status": { "type": "string", "description": "Processing status of the transfer" }
+        } } } } } }
+      }
+    },
+    "/api/v2/standing-instructions": {
+      "post": {
+        "operationId": "createStandingInstruction",
+        "summary": "Create a recurring standing instruction",
+        "description": "Creates a recurring scheduled payment from a source account to a registered beneficiary at a chosen frequency. Returns the instruction_id and the computed next_execution_date. Satisfies BNK-REQ-05.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["source_account_id", "beneficiary_id", "amount", "frequency", "start_date"], "properties": {
+          "source_account_id": { "type": "string", "description": "Account to debit on each execution" },
+          "beneficiary_id": { "type": "string", "description": "Registered destination beneficiary" },
+          "amount": { "type": "number", "description": "Amount to transfer on each execution" },
+          "frequency": { "type": "string", "description": "Recurrence frequency: daily, weekly or monthly" },
+          "start_date": { "type": "string", "description": "ISO 8601 date of the first execution" },
+          "end_date": { "type": "string", "description": "Optional ISO 8601 date after which the instruction stops" }
+        } } } } },
+        "responses": { "201": { "description": "Standing instruction created. Returns instruction_id and next_execution_date.", "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "instruction_id": { "type": "string", "description": "Unique identifier of the standing instruction" },
+          "next_execution_date": { "type": "string", "description": "Computed date of the next scheduled execution" }
+        } } } } } }
+      }
+    },
+    "/api/v2/standing-instructions/{instruction_id}": {
+      "delete": {
+        "operationId": "cancelStandingInstruction",
+        "summary": "Cancel a standing instruction",
+        "description": "Cancels a recurring standing instruction before its next scheduled execution so no further payments are made. Satisfies BNK-REQ-05.",
+        "parameters": [{ "name": "instruction_id", "in": "path", "required": true, "description": "Standing instruction to cancel" }],
+        "responses": { "200": { "description": "Standing instruction cancelled before the next execution." } }
+      }
+    },
+    "/api/v2/cards/{card_id}/controls": {
+      "put": {
+        "operationId": "updateCardControls",
+        "summary": "Update the security controls on a debit card",
+        "description": "Modifies the security controls on a card owned by the authenticated customer. Supports instantly freezing the card, setting per-transaction and daily spending limits, and toggling international, online and contactless usage. The response confirms the resulting state of every control attribute. Satisfies BNK-REQ-06.",
+        "parameters": [{ "name": "card_id", "in": "path", "required": true, "description": "Card whose controls are being modified" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "freeze": { "type": "boolean", "description": "When true the card is instantly blocked for all usage" },
+          "per_transaction_limit": { "type": "number", "description": "Maximum permitted value of a single transaction" },
+          "daily_limit": { "type": "number", "description": "Maximum permitted total spend within one day" },
+          "international_usage": { "type": "boolean", "description": "Allow or block transactions outside the home country" },
+          "online_usage": { "type": "boolean", "description": "Allow or block card-not-present online transactions" },
+          "contactless_usage": { "type": "boolean", "description": "Allow or block contactless tap transactions" }
+        } } } } },
+        "responses": { "200": { "description": "Confirmed resulting control state for freeze, per_transaction_limit, daily_limit, international_usage, online_usage and contactless_usage." } }
+      }
+    },
+    "/api/v2/disputes": {
+      "post": {
+        "operationId": "createDispute",
+        "summary": "Raise a dispute against a settled transaction",
+        "description": "Files a chargeback dispute against a settled transaction. Requires the transaction_id and a dispute_reason from the controlled vocabulary fraudulent, duplicate_charge, service_not_received or incorrect_amount, with an optional narrative. Returns the dispute_id, provisional credit status and expected resolution date. Satisfies BNK-REQ-08.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["transaction_id", "dispute_reason"], "properties": {
+          "transaction_id": { "type": "string", "description": "Settled transaction being disputed" },
+          "dispute_reason": { "type": "string", "description": "Controlled vocabulary reason: fraudulent, duplicate_charge, service_not_received or incorrect_amount" },
+          "narrative": { "type": "string", "description": "Optional free-text description supplied by the customer" }
+        } } } } },
+        "responses": { "201": { "description": "Dispute filed. Returns dispute_id, provisional_credit_status and expected_resolution_date.", "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "dispute_id": { "type": "string", "description": "Unique identifier of the filed dispute" },
+          "provisional_credit_status": { "type": "string", "description": "Whether provisional credit has been applied while the dispute is investigated" },
+          "expected_resolution_date": { "type": "string", "description": "ISO 8601 date by which the dispute is expected to be resolved" }
+        } } } } } }
+      }
+    },
+    "/api/v2/disputes/{dispute_id}": {
+      "get": {
+        "operationId": "getDispute",
+        "summary": "Retrieve dispute status and resolution timeline",
+        "description": "Returns the current status of a filed dispute together with its full event timeline so the customer can track resolution progress. Satisfies BNK-REQ-08.",
+        "parameters": [{ "name": "dispute_id", "in": "path", "required": true, "description": "Dispute to retrieve" }],
+        "responses": { "200": { "description": "Current dispute status and the full timeline of resolution events.", "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "dispute_id": { "type": "string", "description": "Unique identifier of the dispute" },
+          "status_label": { "type": "string", "description": "Human-readable current status of the dispute" },
+          "timeline_events": { "type": "array", "description": "Ordered resolution events with stage name and ISO 8601 timestamp", "items": { "type": "object", "properties": {
+            "stage": { "type": "string", "description": "Resolution stage name" },
+            "timestamp": { "type": "string", "description": "ISO 8601 timestamp of the stage transition" }
+          } } }
+        } } } } } }
+      }
+    }
+  }
+}

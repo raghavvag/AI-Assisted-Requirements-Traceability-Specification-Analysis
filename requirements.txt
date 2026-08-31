@@ -1,0 +1,40 @@
+# Core NLP & Embeddings
+sentence-transformers>=2.2.2
+torch>=2.0.0
+
+# Similarity & Numerical
+scikit-learn>=1.3.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# OpenAPI Parsing
+prance>=23.6.0
+openapi-spec-validator>=0.7.1
+PyYAML>=6.0
+
+# LLM Providers (optional — configure via .env)
+openai>=1.0.0
+groq>=0.4.0
+
+# Vector Database
+qdrant-client>=1.7.0
+
+# Database ORM
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+
+# Authentication
+bcrypt>=4.0.0
+streamlit-authenticator>=0.3.3
+
+# Visualisation & UI
+streamlit>=1.28.0
+plotly>=5.17.0
+
+# Utilities
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
