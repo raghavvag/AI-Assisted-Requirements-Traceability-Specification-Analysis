@@ -87,13 +87,18 @@ class EndpointChange:
     base_text: str = ""
     head_text: str = ""
     change_description: str = ""
+    kind: str = "endpoint"           # endpoint | function | class (code units, src/review/code.py)
+    location: str = ""               # "app/refunds.py:12" for code units
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out = {
             "endpoint_id": self.endpoint_id, "status": self.status,
             "base_id": self.base_id, "head_id": self.head_id,
             "change_description": self.change_description,
         }
+        if self.kind != "endpoint":
+            out.update(kind=self.kind, location=self.location)
+        return out
 
 
 @dataclass(frozen=True)
@@ -104,6 +109,7 @@ class SpecDiff:
     unchanged: Tuple[str, ...]
     # every base-spec endpoint as (id, text): needed to rank trace links
     base_endpoints: Tuple[Tuple[str, str], ...] = ()
+    kind: str = "endpoint"           # "code" when the units are Python symbols
 
     @property
     def changes(self) -> Tuple[EndpointChange, ...]:
@@ -126,10 +132,18 @@ class Violation:
     severity: str
     change_description: str = ""
     explanation: str = ""
+    kind: str = "endpoint"           # endpoint | function | class
+    location: str = ""               # "app/refunds.py:12" for a code symbol
+
+    @property
+    def is_code(self) -> bool:
+        return self.kind != "endpoint"
 
     def to_dict(self) -> Dict[str, Any]:
         """Wire format used by the API / UI (kept from the v1 PR reviewer)."""
         return {
+            "artifact_kind": self.kind,
+            "location": self.location,
             "requirement_id": self.requirement_id,
             "requirement_text": self.requirement_text,
             "endpoint_id": self.endpoint_id,
@@ -155,6 +169,7 @@ class ReviewResult:
     provider_info: str = ""
     markdown: str = ""
     notes: List[str] = field(default_factory=list)
+    code_diff: Optional[SpecDiff] = None         # changed Python symbols (M5), reviewed with the code embedder
 
     @property
     def approved(self) -> bool:
@@ -176,6 +191,9 @@ class ReviewResult:
         d = self.diff
         parts = [f"{self.verdict.value}: {len(d.modified)} modified, {len(d.removed)} removed, "
                  f"{len(d.added)} added endpoint(s)"]
+        if self.code_diff is not None:
+            c = self.code_diff
+            parts.append(f"code: {len(c.modified)} modified, {len(c.removed)} removed, {len(c.added)} added symbol(s)")
         if self.violations:
             parts.append(f"{len(self.violations)} regression(s) on {', '.join(self.regressed_requirements)}")
         if self.intent is not None:
@@ -200,6 +218,7 @@ class ReviewResult:
             "changes": [c.to_dict() for c in self.diff.changes],
             "clean_changes": [c.to_dict() for c in self.clean_changes],
             "unchanged_endpoints": len(self.diff.unchanged),
+            "code_changes": None if self.code_diff is None else [c.to_dict() for c in self.code_diff.changes],
             "intent": None if self.intent is None else {
                 "verdict": self.intent.verdict.value,
                 "coverage": self.intent.coverage,
@@ -387,6 +406,8 @@ def review_endpoint_changes(
                     delta=round(delta, 4),
                     severity=violation_severity(delta),
                     change_description=change.change_description,
+                    kind=change.kind,
+                    location=change.location,
                 ))
                 regressed_ids.add(change.endpoint_id)
 
@@ -414,7 +435,8 @@ def review_endpoint_changes(
         verdict = Verdict.BLOCK if (block_on_unmet_intent and intent_decision.verdict.value == "BLOCK") \
             else Verdict.WARN
     if diff.is_empty:
-        notes.append("No endpoint changed between the two specs.")
+        notes.append("No endpoint changed between the two specs." if diff.kind == "endpoint"
+                     else "No Python symbol changed in the configured code paths.")
 
     result = ReviewResult(
         verdict=verdict, violations=violations, diff=diff, clean_changes=clean, thresholds=t,
@@ -445,7 +467,7 @@ def _link_ranks(req_embeddings, base_scores, scored, diff: SpecDiff, embedder, t
 def _check_intent(intent: Sequence[Any], diff: SpecDiff, t: Thresholds, embedder: Any):
     from src.alignment import ArtifactUnit, ContextUnit, EmbeddingAlignmentScorer, GatePolicy, ThresholdAlignmentGate
 
-    artifacts = [ArtifactUnit(id=c.endpoint_id, text=c.head_text, kind="endpoint")
+    artifacts = [ArtifactUnit(id=c.endpoint_id, text=c.head_text, kind=c.kind, location=c.location)
                  for c in diff.changes if c.status in (ADDED, MODIFIED)]
     if not artifacts:
         return None

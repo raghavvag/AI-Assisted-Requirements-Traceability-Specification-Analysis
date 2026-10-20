@@ -38,6 +38,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
+from datetime import timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
@@ -328,16 +329,28 @@ async def github_webhook(
 # Live reviews (React "Live reviews" tab)
 # ---------------------------------------------------------------------------
 
+def _utc_iso(value) -> Optional[str]:
+    """SQLite returns naive datetimes; they are UTC. Say so, or browsers read them as local time."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
 def _run_summary(run: PRReviewRun) -> Dict[str, Any]:
+    violations = run.violations_json or []
     return {
         "id": run.id, "repo": run.repo, "pr_number": run.pr_number, "pr_title": run.pr_title,
         "pr_url": run.pr_url or f"https://github.com/{run.repo}/pull/{run.pr_number}",
         "pr_author": run.pr_author, "head_sha": run.head_sha, "base_sha": run.base_sha,
         "trigger": run.trigger, "verdict": run.verdict, "conclusion": run.conclusion,
-        "title": run.title, "violations": run.violations_json or [],
+        "title": run.title, "violations": violations,
         "linked_issues": run.linked_issues or [], "check_run_url": run.check_run_url,
         "comment_url": run.comment_url, "error": run.error,
-        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "code_scan": bool((run.report_json or {}).get("code_changes"))
+                     or any(v.get("artifact_kind", "endpoint") != "endpoint" for v in violations),
+        "created_at": _utc_iso(run.created_at),
     }
 
 

@@ -1,13 +1,15 @@
 """
 src/alignment/scorer.py — AlignmentScorer implementations
 ========================================================
-`EmbeddingAlignmentScorer` is the working default (bi-encoder + cosine, reusing
-`src.embedder.SemanticEmbedder`). `SiameseBertAlignmentScorer` and
-`CrossEncoderReranker` are roadmap Phase D stubs with a finalised interface.
+`EmbeddingAlignmentScorer` is the default (bi-encoder + cosine, reusing
+`src.embedder.SemanticEmbedder`). `SiameseBertAlignmentScorer` scores code units
+with a code embedder, and `CompositeAlignmentScorer` routes each artefact to one
+of the two by kind (M5). `CrossEncoderReranker` is still a roadmap stub.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import List, Optional
 
 import numpy as np
@@ -33,7 +35,7 @@ class EmbeddingAlignmentScorer:
 
     def __init__(self, embedder: Optional[SemanticEmbedder] = None,
                  policy: Optional[GatePolicy] = None):
-        self.embedder = embedder or SemanticEmbedder()
+        self.embedder = embedder if embedder is not None else SemanticEmbedder()
         self.policy = policy or GatePolicy()
 
     def score(
@@ -80,35 +82,72 @@ def _shared_terms(a: str, b: str, k: int = 6) -> str:
 
 
 # ===========================================================================
-# STUBS — roadmap Phase D
+# Code-aware scoring (M5)
 # ===========================================================================
 
-class SiameseBertAlignmentScorer:
+CODE_KINDS = frozenset({"function", "class", "diff_hunk"})
+
+
+class SiameseBertAlignmentScorer(EmbeddingAlignmentScorer):
     """
-    Code-aware alignment using a Siamese / bi-encoder model trained on
-    (natural language, code) pairs.
+    Code-aware alignment: a bi-encoder trained on (natural language, code) pairs,
+    default jinaai/jina-embeddings-v2-base-code. Same contract and cosine/rank
+    logic as EmbeddingAlignmentScorer; only the encoder changes. Artefact text is
+    the semantic fingerprint built by PythonASTArtifactSource.
 
-    Roadmap Phase D. Candidate models (drop-in — only the encoder changes):
-      - jinaai/jina-embeddings-v2-base-code
-      - Salesforce/codet5p-110m-embedding
-      - microsoft/codebert-base  (mean-pooled)
-      - Alibaba-NLP/gte-Qwen2-1.5B-instruct  (larger, NL+code)
-
-    Interface is identical to EmbeddingAlignmentScorer.score(); implementation
-    swaps the encoder and uses ArtifactUnit.embedding_text() built by
-    PythonASTArtifactSource (signature + docstring + call neighbourhood).
+    Without the model (offline, tests) `load_code_embedder` falls back to the
+    deterministic LexicalCodeEmbedder; `method` says which one scored.
     """
 
-    method = "siamese-bert-code"
+    def __init__(self, embedder=None, policy: Optional[GatePolicy] = None,
+                 model_name: str = "jinaai/jina-embeddings-v2-base-code"):
+        from src.alignment.code_embedder import load_code_embedder
 
-    def __init__(self, model_name: str = "jinaai/jina-embeddings-v2-base-code"):
-        self.model_name = model_name
+        super().__init__(embedder=embedder or load_code_embedder(model_name), policy=policy)
+        self.method = f"siamese-bert-code:{getattr(self.embedder, 'model_name', model_name)}"
 
-    def score(self, contexts, artifacts):  # pragma: no cover - stub
-        raise NotImplementedError(
-            "SiameseBertAlignmentScorer is roadmap Phase D — see "
-            "docs/architecture/semantic-alignment-roadmap.md"
-        )
+
+class CompositeAlignmentScorer:
+    """
+    Routes each artefact to a scorer by `ArtifactUnit.kind`: code units
+    (function, class, diff_hunk) to the code scorer, everything else (endpoints,
+    prose) to the text scorer. Results keep each scorer's `method`; `rank` is
+    recomputed per context across all artefacts so the contract holds.
+    """
+
+    method = "composite"
+
+    def __init__(self, text_scorer=None, code_scorer=None, code_kinds=CODE_KINDS):
+        self.text_scorer = text_scorer or EmbeddingAlignmentScorer()
+        self.code_scorer = code_scorer or SiameseBertAlignmentScorer()
+        self.code_kinds = frozenset(code_kinds)
+
+    def score(self, contexts: List[ContextUnit], artifacts: List[ArtifactUnit]) -> List[AlignmentResult]:
+        if not contexts or not artifacts:
+            return []
+        code = [a for a in artifacts if a.kind in self.code_kinds]
+        text = [a for a in artifacts if a.kind not in self.code_kinds]
+        rows: List[AlignmentResult] = []
+        if text:
+            rows += self.text_scorer.score(contexts, text)
+        if code:
+            rows += self.code_scorer.score(contexts, code)
+
+        order = {a.id: j for j, a in enumerate(artifacts)}
+        by_ctx: dict = {}
+        for r in rows:
+            by_ctx.setdefault(r.context_id, []).append(r)
+        out: List[AlignmentResult] = []
+        for ctx in contexts:
+            ranked = sorted(by_ctx.get(ctx.id, []), key=lambda r: (-r.score, order[r.artifact_id]))
+            out += [replace(r, rank=i + 1) for i, r in enumerate(ranked)]
+        out.sort(key=lambda r: ([c.id for c in contexts].index(r.context_id), order[r.artifact_id]))
+        return out
+
+
+# ===========================================================================
+# STUB — roadmap Phase D (optional precision stage)
+# ===========================================================================
 
 
 class CrossEncoderReranker:

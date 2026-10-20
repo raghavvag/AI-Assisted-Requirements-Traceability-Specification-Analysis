@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import { Plus, Folder, ChevronRight, Upload, X, Trash2, CheckCircle, AlertTriangle } from 'lucide-react'
 import { apiError, projectsApi } from '../services/api'
 import SrsPreview from '../components/SrsPreview'
+import PrActivity from '../components/PrActivity'
 import { useDropzone } from 'react-dropzone'
 import toast from 'react-hot-toast'
 
@@ -256,6 +257,9 @@ export default function DashboardPage() {
         <h1 className="text-3xl font-bold"><span className="gradient-text">My Projects</span></h1>
         <p className="text-slate-400 text-sm mt-1">Traceability audits scoped to your account</p>
       </motion.div>
+
+      {/* Live bot reviews; rows open in the first project's PR Bot page */}
+      <PrActivity projectId={projects[0]?.id} />
 
       {/* Create bar */}
       <div className="mb-6">

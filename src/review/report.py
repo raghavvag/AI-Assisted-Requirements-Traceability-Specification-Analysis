@@ -46,6 +46,12 @@ def render_markdown(result: "ReviewResult", now: Optional[datetime] = None) -> s
     lines += [
         f"| Endpoints Changed | {len(d.changes)} ({len(d.modified)} modified, {len(d.removed)} removed, "
         f"{len(d.added)} added) |",
+    ]
+    c = result.code_diff
+    if c is not None:
+        lines.append(f"| Code Symbols Changed | {len(c.changes)} ({len(c.modified)} modified, "
+                     f"{len(c.removed)} removed, {len(c.added)} added) |")
+    lines += [
         f"| Compliance Violations | {len(result.violations)} |",
         f"| Clean Changes (No Violations) | {len(result.clean_changes)} |",
     ]
@@ -63,9 +69,21 @@ def render_markdown(result: "ReviewResult", now: Optional[datetime] = None) -> s
                 "| Field | Value |",
                 "|---|---|",
                 f"| **Requirement** | `{v.requirement_id}` |",
-                f"| **Endpoint** | `{v.endpoint_id}` ({v.change_status}) |",
-                f"| **v1.0 Score** | `{v.score_v1:.4f}` |",
-                f"| **v2.0 Score** | `{v.score_v2:.4f}` |",
+            ]
+            if v.is_code:
+                lines += [
+                    f"| **Code symbol** | `{v.endpoint_id.split('::')[-1]}` ({v.kind}, {v.change_status}) |",
+                    f"| **Location** | `{v.location}` |",
+                    f"| **Base Score** | `{v.score_v1:.4f}` |",
+                    f"| **Head Score** | `{v.score_v2:.4f}` |",
+                ]
+            else:
+                lines += [
+                    f"| **Endpoint** | `{v.endpoint_id}` ({v.change_status}) |",
+                    f"| **v1.0 Score** | `{v.score_v1:.4f}` |",
+                    f"| **v2.0 Score** | `{v.score_v2:.4f}` |",
+                ]
+            lines += [
                 f"| **Score Delta** | `{v.delta:.4f}` |",
                 f"| **Change** | {v.change_description or 'N/A'} |",
                 "",
@@ -80,8 +98,11 @@ def render_markdown(result: "ReviewResult", now: Optional[datetime] = None) -> s
         lines += [
             "### ✅ No Compliance Violations Detected",
             "",
-            "All changed endpoints maintain or improve alignment with the requirement baseline."
-            if not d.is_empty else "No endpoint changed between the two specifications.",
+            ("All changed endpoints and code symbols maintain or improve alignment with the requirement baseline."
+             if c is not None and not c.is_empty else
+             "All changed endpoints maintain or improve alignment with the requirement baseline.")
+            if not (d.is_empty and (c is None or c.is_empty))
+            else "No endpoint changed between the two specifications.",
             "",
             "---",
             "",

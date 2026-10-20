@@ -22,6 +22,21 @@ Run:
             from the expected one. Loads the embedding model, about a minute.
   --force   recreate scenario branches that already exist locally.
 Nothing is pushed.
+
+M5, code-aware review (two phases, each a branch off origin/main):
+  python scripts/setup_demo_repo.py --code baseline   [--verify]
+      add_service_code: the FastAPI service in scripts/demo_repo/app + `code:` in
+      .traceability.yml -> expected PASS. Merge its PR before phase 2.
+  python scripts/setup_demo_repo.py --code regression [--verify]
+      code_drop_transaction_id: the refund handler and models stop taking the
+      client transaction_id (scripts/demo_repo/code_regression.py); openapi.yaml
+      is untouched -> expected BLOCK on REQ-04, caught from the code alone.
+  python scripts/setup_demo_repo.py --code add-2fa        [--verify]
+      add_2fa_module: adds app/twofa.py (REQ-09's challenge / verify / step-up
+      policy) to a demo repo created before it existed -> expected PASS. Merge it.
+  python scripts/setup_demo_repo.py --code regression-2fa [--verify]
+      code_drop_2fa_step_up: deletes the step-up policy, the checkout 2FA check
+      and two_fa_token -> expected BLOCK on REQ-09.
 """
 
 from __future__ import annotations
@@ -347,5 +362,130 @@ def main() -> None:
     print(git(repo, "log", "--oneline", "--graph", "--all", "-n", "10"))
 
 
+# ---------------------------------------------------------------------------
+# M5: code-aware scenario (two phases, each a branch off origin/main)
+# ---------------------------------------------------------------------------
+
+CODE_BLOCK = """\
+code:                            # M5: also review changed Python code
+  paths: ["app/**/*.py"]
+  exclude: ["tests/**"]
+  model: jinaai/jina-embeddings-v2-base-code
+"""
+DEMO_APP = TEXTS / "app"
+CODE_PHASES = {
+    #  phase:      (branch, commit message, expected verdict, requirement that must be blocked)
+    "baseline": ("add_service_code", "feat(app): add the FastAPI service and enable code scanning", "PASS", None),
+    "regression": ("code_drop_transaction_id",
+                   "refactor(refund): server-generated refund reference instead of the client transaction_id",
+                   "BLOCK", "REQ-04"),
+    # for a demo repo whose service predates app/twofa.py
+    "add-2fa": ("add_2fa_module", "feat(auth): two-factor step-up challenge and verification (REQ-09)", "PASS", None),
+    "regression-2fa": ("code_drop_2fa_step_up",
+                       "refactor(checkout): drop the 2FA step-up gate for frictionless checkout",
+                       "BLOCK", "REQ-09"),
+}
+REGRESSION_SCENARIO = {"regression": "refund", "regression-2fa": "2fa"}
+
+
+def _app_files(root: Path) -> dict:
+    return {f"app/{p.name}": p.read_text(encoding="utf-8") for p in sorted((root / "app").glob("*.py"))}
+
+
+def verify_code(phase: str, base_files: dict, head_files: dict) -> None:
+    """Review the code change in-process with the configured code model."""
+    sys.path.insert(0, str(ROOT))
+    from src.alignment.code_embedder import calibrated_thresholds, load_code_embedder
+    from src.config import CodeConfig, Thresholds
+    from src.review import diff_code, review_change
+    from src.srs import extract_requirements_with_report
+
+    _, _, expected, req = CODE_PHASES[phase]
+    reqs, _ = extract_requirements_with_report(SRS_FIXTURE)
+    cfg = CodeConfig(paths=["app/**/*.py"], exclude=["tests/**"])
+    emb = load_code_embedder(cfg.model)
+    diff, notes = diff_code(base_files, head_files)
+    result = review_change(reqs, spec_diff=None, code_diff=diff, code_notes=notes, thresholds=Thresholds(),
+                           code_thresholds=cfg.thresholds_for(Thresholds(), calibrated_thresholds(emb)),
+                           embedder=None, code_embedder=emb)
+    blocked = result.regressed_requirements
+    ok = result.verdict.value == expected and (req is None or blocked == [req])
+    print(f"  {'ok  ' if ok else 'FAIL'} {phase:10s} {result.verdict.value:5s} violations={blocked or '-'} "
+          f"(expected {expected}{f' on {req}' if req else ''}; scored with {getattr(emb, 'model_name', emb)})")
+    if not ok:
+        raise SystemExit(f"Unexpected verdict for the code {phase}. Nothing was committed.")
+
+
+def code_branch(repo: Path, phase: str, *, force: bool, verify: bool) -> None:
+    branch, message, expected, req = CODE_PHASES[phase]
+    git(repo, "fetch", "-q", "origin")
+    if branch_exists(repo, branch):
+        if not force:
+            print(f"• {branch}: already exists, kept (use --force to recreate)")
+            return
+        git(repo, "checkout", "-q", "main")
+        git(repo, "branch", "-D", branch)
+    git(repo, "checkout", "-q", "-b", branch, "origin/main")
+    try:
+        if phase == "baseline":
+            base_files = {}
+            (repo / "app").mkdir(exist_ok=True)
+            for src in sorted(DEMO_APP.glob("*.py")):
+                shutil.copy2(src, repo / "app" / src.name)
+            (repo / "app" / "__init__.py").write_text('"""Nexus storefront service (demo for code scanning)."""\n',
+                                                      encoding="utf-8", newline="\n")
+            config = (repo / ".traceability.yml").read_text(encoding="utf-8")
+            if "\ncode:" not in config:
+                (repo / ".traceability.yml").write_text(config.rstrip("\n") + "\n" + CODE_BLOCK,
+                                                        encoding="utf-8", newline="\n")
+            head_files = _app_files(repo)
+        elif phase == "add-2fa":
+            base_files = _app_files(repo)
+            if "app/twofa.py" in base_files:
+                raise SystemExit("origin/main already has app/twofa.py: run `--code regression-2fa`.")
+            shutil.copy2(DEMO_APP / "twofa.py", repo / "app" / "twofa.py")
+            head_files = _app_files(repo)
+        else:
+            base_files = _app_files(repo)
+            needs = "app/twofa.py" if phase == "regression-2fa" else "app/refunds.py"
+            if needs not in base_files:
+                raise SystemExit(f"origin/main has no {needs} yet: merge the "
+                                 f"{'add_2fa_module' if phase == 'regression-2fa' else 'add_service_code'} PR first.")
+            sys.path.insert(0, str(TEXTS))
+            from code_regression import apply
+
+            head_files = apply(base_files, REGRESSION_SCENARIO[phase])
+            for path, src in head_files.items():
+                (repo / path).write_text(src, encoding="utf-8", newline="\n")
+        if verify:
+            print(f"• Verifying the code {phase} with the review engine…")
+            def strip(files):
+                return {k: v for k, v in files.items() if k != "app/__init__.py"}
+            verify_code(phase, strip(base_files), strip(head_files))
+        commit_all(repo, message)
+    except BaseException:
+        git(repo, "checkout", "-q", "-f", "main")
+        git(repo, "branch", "-D", branch, check=False)
+        raise
+    git(repo, "checkout", "-q", "main")
+    print(f"• {branch}: committed on origin/main (expected {expected}{f' on {req}' if req else ''})")
+
+
+def main_code(argv=None) -> None:
+    ap = argparse.ArgumentParser(description="M5 code scenario for traceability-demo-store")
+    ap.add_argument("phase", choices=sorted(CODE_PHASES))
+    ap.add_argument("--path", type=Path, default=ROOT.parent / "traceability-demo-store")
+    ap.add_argument("--remote", default=DEFAULT_REMOTE)
+    ap.add_argument("--verify", action="store_true")
+    ap.add_argument("--force", action="store_true")
+    args = ap.parse_args(argv)
+    repo = args.path.resolve()
+    ensure_repo(repo, args.remote)
+    code_branch(repo, args.phase, force=args.force, verify=args.verify)
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "--code":
+        main_code(sys.argv[2:])
+    else:
+        main()

@@ -209,3 +209,56 @@ summary. Pin a tag (e.g. `@v1`) once one is published.
 Both call `src/review/engine.py`, so the verdict for the same change is identical. This repository runs the
 action's logic in `.github/workflows/compliance.yml`, which also has a self-test job: it reviews store_v1 → store_v2
 and fails if the gate stops blocking the known drift on REQ-04 and REQ-09.
+
+## 8. Code-aware review (M5)
+
+Add a `code:` block to `.traceability.yml` and the bot also reviews changed Python files, even when the PR does
+not touch the OpenAPI spec:
+
+```yaml
+code:
+  paths: ["app/**/*.py"]           # globs; ** spans directories
+  exclude: ["tests/**"]
+  model: jinaai/jina-embeddings-v2-base-code   # or "lexical" (offline, no model)
+  thresholds: {}                   # optional overrides of the calibrated code thresholds
+```
+
+How it works (`src/alignment/code_units.py`, `src/review/code.py`):
+
+- Every top-level function, method and class becomes a **semantic fingerprint**: route (FastAPI decorators
+  with the router prefix), signature, docstring, the fields of the Pydantic models it takes or returns (with their
+  `Field(description=…)`), the parameter attributes it reads, the keys it returns and the functions it calls.
+  Line numbers are not part of it, so moving code is not a change.
+- Base and head fingerprints are compared. A symbol is *modified* when its fingerprint differs, so a PR that only
+  drops a field from `RefundRequest` also re-scores the handler that accepts it.
+- A removed symbol whose body reappears almost unchanged under another name or file (≥ 80 % similar) is a
+  **rename / move**, reviewed as a modification. Without that, renaming a handler would look like deleting it.
+- Changed symbols go through the same rule as endpoints (tiered regression, trace-link top-k, severity),
+  scored with the code model. Thresholds are calibrated per embedder: jina `-0.025 / -0.03`, `link_top_k: 5`
+  (benign edits move scores by ≤ 0.013; dropping `transaction_id` moves REQ-04 by −0.036 … −0.048), lexical
+  fallback `-0.10 / -0.15`, `link_top_k: 5`. Code uses top-5 trace links, not top-3: one requirement is
+  implemented by several units (handler, models, policy helper, verifier), and REQ-09's step-up policy is its
+  4th-best match.
+- The check summary and the comment name the symbol and its `file:line`; the Live reviews tab links it to the line
+  on GitHub.
+
+The first code review downloads the jina model (~300 MB, `trust_remote_code=True`) into `~/.cache/huggingface`.
+If it cannot load, the deterministic lexical fallback is used and the report says so.
+
+**Known limits**
+
+- A requirement can only regress if some code is traced to it (best match ≥ `relevance_floor`, 0.35). In the
+  first demo service REQ-09 had no 2FA module (checkout only called an external `twofa.is_verified`), its best
+  match was 0.315, and even deleting the whole 2FA check passed. Adding `app/twofa.py` (challenge, verify,
+  `requires_step_up`) gave REQ-09 real trace links (best 0.62).
+- Contract, field and symbol removals are caught well. Deleting one `if` inside a function that keeps its
+  name, docstring and models barely moves the fingerprint and is not flagged on its own.
+- The lexical fallback (no model) catches the REQ-04 field drop but not the REQ-09 step-up removal.
+
+Demo: `python scripts/setup_demo_repo.py --code baseline --verify` (PR adds the service, PASS), merge it, then
+`--code regression --verify` (PR drops `transaction_id` in Python only, BLOCK on REQ-04). For REQ-09:
+`--code add-2fa` (adds `app/twofa.py`, PASS; only needed for a demo repo set up before it existed), merge it,
+then `--code regression-2fa` (deletes the step-up policy, the checkout check and `two_fa_token`, BLOCK on
+REQ-09). Live result on
+2026-10-20: PR #7 PASS (14 symbols added), PR #8 BLOCK on REQ-04 via `process_refund` (`app/refunds.py:11`),
+`RefundRequest` and `RefundReceipt`, merge blocked by the ruleset.

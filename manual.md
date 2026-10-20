@@ -148,17 +148,26 @@ invalid spec). A crash also shows up as a failed check with the error. Fix it an
 delivery in Advanced → Recent Deliveries). Redelivering a delivery that already completed is ignored on purpose.
 
 
-## E. M4 (CI/CD): workflows written, need a push
-`.github/workflows/ci.yml` (ruff + pytest + frontend build), `.github/workflows/compliance.yml` (semantic gate +
-self-test) and `action.yml` (reusable action) are in the repo, and `ruff.toml` pins the lint rules. They have only
-been checked locally (YAML parse, actionlint, a local run of the action's script); GitHub has not run them yet.
-- [ ] Commit and push to GitHub with Actions enabled. Watch the first **CI** and **Compliance** runs; the Linux
-  runner may surface a Windows-only assumption in a test.
+## E. M4 (CI/CD): live
+`.github/workflows/ci.yml`, `.github/workflows/compliance.yml`, `action.yml` and `ruff.toml` were pushed on
+2026-10-20 (`08f7638`). The first CI run found a real missing dependency (`sqlalchemy[asyncio]` / greenlet);
+fixed in `147dd3d`, after which **CI and Compliance are both green**.
+- [x] Commit and push to GitHub with Actions enabled.
 - [ ] Optional: add `OPENAI_API_KEY` as a repository secret for LLM explanations in the compliance report.
 - [ ] After the first green run, mark **Python (ruff + pytest)**, **Frontend (build)**, **Requirements Traceability
   gate** and **Gate self-test** as **required** on `main` (T4.6), and add a README badge.
 - [ ] T4.5 follow-up: once a tag (`v1`) exists, add the action to the demo repo as a second, App-free gate
   (`docs/github-app-setup.md` §7).
+
+## F. M5 (code-aware review): committed
+Verified live on the demo repo on 2026-10-20: PR #7 (adds `app/`, PASS, merged); PR #8 drops `transaction_id`
+in Python only and is **BLOCKed on REQ-04** with the merge button disabled. A second round fixed two gaps found
+while testing REQ-09 (code `link_top_k` 3 -> 5; renames are not removals) and added `app/twofa.py`.
+Details: `docs/github-app-setup.md` §8.
+- [ ] Keep `#8` (and the REQ-09 PR) open as report evidence; do not merge them.
+- [ ] uvicorn now loads two models (mpnet + jina, ~1.3 GB RAM together).
+- [ ] Optional: T5.5 evaluation (`data/ground_truth/code_labels.csv`, P/R/F1 per acceptance criterion) for the report.
+- [ ] Stop the old smee-client that still targets `localhost` (it silently drops events; the `127.0.0.1` one works).
 
 ---
 

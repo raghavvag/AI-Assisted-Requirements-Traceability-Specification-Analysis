@@ -23,6 +23,11 @@ deterministic rules.
       id_pattern: null
       include_nfr: true
       extra_blocklist: [Stakeholders]
+    code:                            # optional (M5): also review changed Python code
+      paths: ["app/**/*.py"]         # globs; ** spans directories
+      exclude: ["tests/**"]
+      model: jinaai/jina-embeddings-v2-base-code   # or "lexical" (offline fallback)
+      thresholds: {}                 # overrides of the embedder's calibrated code thresholds
 
 Relative paths are resolved against the directory that contains the file.
 Environment variables override the file (CI convenience):
@@ -120,6 +125,37 @@ class SrsExtractionConfig(_Strict):
                                  extra_blocklist=tuple(self.extra_blocklist))
 
 
+class CodeConfig(_Strict):
+    """`code:` block: review changed Python symbols as well as the OpenAPI spec (M5)."""
+
+    paths: List[str] = Field(..., min_length=1, description="Glob(s) of the Python files to review")
+    exclude: List[str] = Field(default_factory=list, description="Glob(s) to leave out, e.g. tests/**")
+    model: str = Field("jinaai/jina-embeddings-v2-base-code",
+                       description='Code embedding model, or "lexical" for the offline fallback')
+    thresholds: Dict[str, float] = Field(default_factory=dict,
+                                         description="Overrides of the code embedder's calibrated thresholds")
+
+    @field_validator("paths", "exclude", mode="before")
+    @classmethod
+    def _one_or_many(cls, v: Any) -> Any:
+        return [v] if isinstance(v, str) else v
+
+    @field_validator("thresholds")
+    @classmethod
+    def _known_keys(cls, v: Dict[str, float]) -> Dict[str, float]:
+        unknown = sorted(set(v) - set(Thresholds.model_fields))
+        if unknown:
+            raise ValueError(f"unknown threshold(s) {unknown}; known: {sorted(Thresholds.model_fields)}")
+        return v
+
+    def thresholds_for(self, base: "Thresholds", calibrated: Mapping[str, float]) -> "Thresholds":
+        """Spec thresholds, then the embedder's calibrated code values, then the user's overrides."""
+        try:
+            return Thresholds.model_validate({**base.model_dump(), **calibrated, **self.thresholds})
+        except ValidationError as exc:
+            raise ConfigError(_format_errors(exc, "code.thresholds")) from exc
+
+
 class TraceabilityConfig(_Strict):
     version: int = 1
     srs: str = Field(..., description="Path to the SRS document (.docx, .pdf, .md, .txt)")
@@ -127,6 +163,7 @@ class TraceabilityConfig(_Strict):
     thresholds: Thresholds = Field(default_factory=Thresholds)
     fail_on: FailOn = FailOn.BLOCK
     srs_extraction: SrsExtractionConfig = Field(default_factory=SrsExtractionConfig)
+    code: Optional[CodeConfig] = None
 
     _base_dir: Path = PrivateAttr(default_factory=Path.cwd)
     _source: str = PrivateAttr(default="")

@@ -1048,3 +1048,71 @@ class TestReviewsEndpoint:
 
     def test_requires_login(self, review_db):
         assert TestClient(app).get("/api/github/reviews").status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# M5: code-aware review through the bot (code.paths in .traceability.yml)
+# ---------------------------------------------------------------------------
+
+import sys as _sys  # noqa: E402
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "scripts" / "demo_repo"))
+from code_regression import apply as _apply_code_regression  # noqa: E402
+
+from src.alignment.code_embedder import LexicalCodeEmbedder  # noqa: E402
+
+_DEMO_APP = _Path(__file__).resolve().parents[1] / "scripts" / "demo_repo" / "app"
+CODE_CONFIG = {**CONFIG, "code": {"paths": ["app/**/*.py"], "model": "lexical"}}
+
+
+class TestReviewFlowCode:
+    @staticmethod
+    def _world(flow_world, head_files, *, pr_body=""):
+        repo, flow = flow_world["repo"], flow_world["flow"]
+        flow.code_embedder_factory = lambda model: LexicalCodeEmbedder()
+        base_files = {f"app/{p.name}": p.read_text(encoding="utf-8") for p in sorted(_DEMO_APP.glob("*.py"))}
+        for sha in (BASE_SHA, MERGE_BASE, HEAD_SHA):
+            repo.put(sha, ".traceability.yml", CODE_CONFIG)
+            repo.put(sha, "docs/SRS.docx", SRS_DOCX)
+            repo.put(sha, "openapi.yaml", _spec())                     # the spec is not touched
+        for sha in (BASE_SHA, MERGE_BASE):
+            for path, src in base_files.items():
+                repo.put(sha, path, src)
+        head = head_files(base_files)
+        for path, src in head.items():
+            repo.put(HEAD_SHA, path, src)
+        repo.pr_files = [{"filename": p, "status": "modified", "patch": "@@ -1 +1 @@\n-x\n+y\n"}
+                         for p in sorted(head) if head[p] != base_files[p]]
+        return run(flow(_job("remove_idempotency", pr_body=pr_body)))
+
+    def test_python_field_drop_blocks_without_a_spec_change(self, flow_world):
+        outcome = self._world(flow_world, _apply_code_regression)
+        assert (outcome.verdict, outcome.conclusion) == ("BLOCK", "failure")
+        assert outcome.result.regressed_requirements == ["REQ-04"]
+        assert outcome.title == "BLOCK: 1 requirement regressed"
+        assert "| Requirement | Endpoint / code |" in outcome.summary
+        assert "`process_refund` (function, `app/refunds.py:" in outcome.summary
+        assert "code `app/**/*.py`" in outcome.summary
+        (row,) = flow_world["rows"]()
+        kinds = {v["artifact_kind"] for v in row.violations_json}
+        assert kinds <= {"function", "class"} and all(v["location"].startswith("app/") for v in row.violations_json)
+        assert row.report_json["code_changes"] and "Code symbol" in row.markdown
+
+    def test_benign_python_change_passes(self, flow_world):
+        def log_line(files):
+            return {**files, "app/refunds.py": files["app/refunds.py"].replace(
+                "    order = ledger.get_order(req.order_id)\n",
+                "    logger.info('refund for %s', req.order_id)\n    order = ledger.get_order(req.order_id)\n")}
+        outcome = self._world(flow_world, log_line)
+        assert (outcome.verdict, outcome.conclusion) == ("PASS", "success")
+        assert outcome.title == "PASS: no requirement regressed (0 endpoint, 1 code change)"
+        assert "`process_refund` (function, `app/refunds.py:" in outcome.summary
+
+    def test_code_outside_the_globs_is_skipped(self, flow_world):
+        repo = flow_world["repo"]
+        repo.scenario("add_endpoint")
+        for sha in (BASE_SHA, MERGE_BASE, HEAD_SHA):
+            repo.put(sha, ".traceability.yml", CODE_CONFIG)
+        repo.pr_files = [{"filename": "scripts/tool.py", "status": "modified"}]
+        outcome = run(flow_world["flow"](_job("add_endpoint")))
+        assert outcome.verdict == "SKIPPED" and "`app/**/*.py`" in outcome.summary

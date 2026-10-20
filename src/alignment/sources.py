@@ -1,16 +1,20 @@
 """
 src/alignment/sources.py — Context & Artifact sources
 ====================================================
-Working sources wrap the existing v1.0 parser. Future sources (Jira, git diff,
-Python AST) are declared as documented stubs so the interface and roadmap are
-concrete — see docs/architecture/semantic-alignment-roadmap.md.
+SRS and OpenAPI sources wrap the v1.0 parser. The code sources (M5) emit
+Python symbols as units: PythonASTArtifactSource for whole files,
+GitDiffArtifactSource for what changed between two git refs. Jira is still a
+documented stub — see docs/architecture/semantic-alignment-roadmap.md.
 """
 
 from __future__ import annotations
 
-from typing import List
+import subprocess
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Union
 
 from src.alignment.base import ArtifactUnit, ContextUnit
+from src.alignment.code_units import CodeSymbol, FilePatch, parse_unified_diff, path_matches, symbols_from_sources
 from src.parser import extract_endpoints, extract_requirements
 
 
@@ -61,51 +65,115 @@ class OpenAPIArtifactSource:
 
 
 # ===========================================================================
-# STUBS — roadmap Phases B–D. Interface is final; implementation is pending.
+# Code sources (M5) — fingerprints from src/alignment/code_units.py
 # ===========================================================================
 
-class GitDiffArtifactSource:
-    """
-    ArtifactSource that emits changed files / hunks between two git refs.
-
-    Roadmap Phase B. Planned implementation:
-      - `git diff --unified=0 {base_ref}...{head_ref}` (or GitPython)
-      - one ArtifactUnit per changed hunk: text = added lines + surrounding
-        function signature; location = "path:start_line-end_line"
-      - filter to source files (respect .gitattributes / language allow-list)
-    """
-
-    def __init__(self, repo_path: str, base_ref: str, head_ref: str):
-        self.repo_path, self.base_ref, self.head_ref = repo_path, base_ref, head_ref
-
-    def load(self) -> List[ArtifactUnit]:  # pragma: no cover - stub
-        raise NotImplementedError(
-            "GitDiffArtifactSource is roadmap Phase B — see "
-            "docs/architecture/semantic-alignment-roadmap.md"
-        )
+def _unit(sym: CodeSymbol, **extra: str) -> ArtifactUnit:
+    return ArtifactUnit(id=sym.id, text=sym.text, kind=sym.kind, location=sym.location,
+                        metadata={"qualname": sym.qualname, "path": sym.path, "route": sym.route, **extra})
 
 
 class PythonASTArtifactSource:
-    """
-    ArtifactSource that emits per-symbol units from changed Python files.
+    """One ArtifactUnit per top-level function, class and method of the given files.
 
-    Roadmap Phase D. Planned implementation:
-      - walk the AST of each changed file (`ast` module)
-      - one ArtifactUnit per FunctionDef / AsyncFunctionDef / ClassDef
-      - text = qualified name + signature + docstring + one-line body summary +
-        names of called functions (1-hop call graph) — a semantic fingerprint,
-        not raw source
-      - pair with a code-aware scorer (see SiameseBertAlignmentScorer)
+    `location` is "path:line" (paths are reported relative to `root` when given).
+    Pydantic-style models resolve across all the files, so a handler's text lists
+    the fields of the model it accepts.
     """
 
-    def __init__(self, file_paths: List[str]):
-        self.file_paths = file_paths
+    def __init__(self, file_paths: Sequence[Union[str, Path]], root: Union[str, Path, None] = None):
+        self.file_paths = [Path(p) for p in file_paths]
+        self.root = Path(root) if root is not None else None
+        self.notes: List[str] = []
 
-    def load(self) -> List[ArtifactUnit]:  # pragma: no cover - stub
-        raise NotImplementedError(
-            "PythonASTArtifactSource is roadmap Phase D — see "
-            "docs/architecture/semantic-alignment-roadmap.md"
-        )
+    def _display(self, path: Path) -> str:
+        if self.root is not None:
+            try:
+                return path.resolve().relative_to(self.root.resolve()).as_posix()
+            except ValueError:
+                pass
+        return path.as_posix()
+
+    def load(self) -> List[ArtifactUnit]:
+        files = {self._display(p): p.read_text(encoding="utf-8", errors="replace") for p in self.file_paths}
+        symbols, self.notes = symbols_from_sources(files)
+        return [_unit(s) for syms in symbols.values() for s in syms]
+
+
+class GitDiffArtifactSource:
+    """Changed Python symbols between two git refs.
+
+    Runs `git diff --unified=0 base...head` (three dots: the PR's own commits,
+    from the merge base), maps every hunk to its enclosing function / class
+    through the AST of both versions, and compares fingerprints:
+
+      load()       ArtifactUnits of the changed symbols (head version; a removed
+                   symbol keeps its base text). metadata: status = added |
+                   modified | removed, touched = "yes" if a hunk is inside it,
+                   "via-model" if only a model it uses changed.
+      code_diff()  the same change as an engine SpecDiff (src.review.code.diff_code)
+    """
+
+    def __init__(self, repo_path: Union[str, Path], base_ref: str, head_ref: str = "HEAD",
+                 paths: Sequence[str] = ("**/*.py",), exclude: Sequence[str] = ()):
+        self.repo_path, self.base_ref, self.head_ref = Path(repo_path), base_ref, head_ref
+        self.paths, self.exclude = list(paths), list(exclude)
+        self.notes: List[str] = []
+
+    def _git(self, *args: str, check: bool = True) -> str:
+        res = subprocess.run(["git", "-C", str(self.repo_path), *args], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace")
+        if check and res.returncode != 0:
+            raise RuntimeError(f"git {' '.join(args)} failed: {res.stderr.strip()}")
+        return res.stdout
+
+    def _show(self, ref: str, path: str) -> Optional[str]:
+        res = subprocess.run(["git", "-C", str(self.repo_path), "show", f"{ref}:{path}"], capture_output=True,
+                             text=True, encoding="utf-8", errors="replace")
+        return res.stdout if res.returncode == 0 else None
+
+    def patches(self) -> Dict[str, FilePatch]:
+        text = self._git("diff", "--unified=0", "--no-color", "--find-renames", f"{self.base_ref}...{self.head_ref}")
+        return {path: p for path, p in parse_unified_diff(text).items()
+                if path_matches(path, self.paths, self.exclude)
+                or (p.old_path and path_matches(p.old_path, self.paths, self.exclude))}
+
+    def _versions(self):
+        merge_base = self._git("merge-base", self.base_ref, self.head_ref).strip()
+        patches = self.patches()
+        base_files: Dict[str, Optional[str]] = {}
+        head_files: Dict[str, Optional[str]] = {}
+        touched = {}
+        for path, p in patches.items():                 # keyed by the head path; a rename keeps one id space
+            base_files[path] = self._show(merge_base, p.old_path) if p.old_path else None
+            head_files[path] = self._show(self.head_ref, p.new_path) if p.new_path else None
+            touched[path] = (sorted(p.base_lines), sorted(p.head_lines))
+        return base_files, head_files, touched
+
+    def code_diff(self):
+        from src.review.code import diff_code      # local import: src.review depends on this package
+
+        base_files, head_files, touched = self._versions()
+        diff, self.notes = diff_code(base_files, head_files, touched_lines=touched)
+        return diff
+
+    def load(self) -> List[ArtifactUnit]:
+        diff = self.code_diff()
+        units = []
+        for change in diff.changes:
+            via_model = change.status == "modified" and "via a model" in change.change_description
+            units.append(ArtifactUnit(
+                id=change.endpoint_id, text=change.head_text or change.base_text, kind=change.kind,
+                location=change.location,
+                metadata={"status": change.status, "touched": "via-model" if via_model else "yes",
+                          "change": change.change_description},
+            ))
+        return units
+
+
+# ===========================================================================
+# STUB — roadmap Phase C. Interface is final; implementation is pending.
+# ===========================================================================
 
 
 class JiraContextSource:

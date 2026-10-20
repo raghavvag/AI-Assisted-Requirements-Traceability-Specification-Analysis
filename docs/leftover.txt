@@ -365,32 +365,39 @@ M4  CI/CD PIPELINE INTEGRATION  (~1.5-2 days)   [§5]
 [~] T4.5  Root action.yml composite action (inputs config, base-ref, fail-on, python-version)
           wrapping the CLI. Use it from the demo repo as a second, App-free gate. Document the
           App-vs-Action trade-off in docs/github-app-setup.md.                   [§5.3]
-[ ] T4.6  Mark the CI and compliance checks as required on this repo's main branch, and add a
+[~] T4.6  Mark the CI and compliance checks as required on this repo's main branch, and add a
           README badge.
           Milestone done when: a PR that breaks REQ-04 is blocked by CI, and a clean PR passes.
 
 ======================================================================
 M5  CODE-AWARE EXPANSION  (OPTIONAL PHASE 2, ~5+ days)   [§6]
 ======================================================================
-[ ] T5.1  Implement PythonASTArtifactSource in src/alignment/sources.py. One unit per
+[x] T5.1  Implement PythonASTArtifactSource in src/alignment/sources.py. One unit per
           function/class, with text made of:
           - qualified name, signature with type hints, docstring;
           - decorators (FastAPI route = endpoint link);
           - pydantic field names;
           - called names one hop out.
           location = path:line.
-[ ] T5.2  Implement GitDiffArtifactSource: git diff --unified=0 base...head, map each hunk to its
+[x] T5.2  Implement GitDiffArtifactSource: git diff --unified=0 base...head, map each hunk to its
           enclosing symbol through the AST, and emit the changed symbols.
-[ ] T5.3  Implement SiameseBertAlignmentScorer (jina-embeddings-v2-base-code,
+[~] T5.3  Implement SiameseBertAlignmentScorer (jina-embeddings-v2-base-code,
           trust_remote_code=True) and CompositeAlignmentScorer (scorer by ArtifactUnit.kind). Add an
           optional CrossEncoderReranker on the top-K.
-[ ] T5.4  Contract tests that every AlignmentScorer must pass: bounds [0,1], determinism, ranks,
+[x] T5.4  Contract tests that every AlignmentScorer must pass: bounds [0,1], determinism, ranks,
           and one result per pair (roadmap Phase A).
 [ ] T5.5  Demo FastAPI service (~15 handlers) plus data/ground_truth/code_labels.csv. Evaluate
           P/R/F1/MAP with src/evaluator.py, comparing jina+composite against mpnet-only.
           Gate: per-AC F1 >= 0.75.
-[ ] T5.6  Engine and bot integration: if `code.paths` is set in .traceability.yml and the PR changes
+[x] T5.6  Engine and bot integration: if `code.paths` is set in .traceability.yml and the PR changes
           code but no spec, review code units. Check whether REQ-04 field-level drift is now caught.
+          (2026-10-20: T5.1-T5.4 + T5.6 done. src/alignment/code_units.py (fingerprints, diff hunks, globs),
+          code_embedder.py (jina + deterministic lexical fallback, per-embedder calibrated thresholds),
+          sources.py PythonASTArtifactSource / GitDiffArtifactSource, scorer.py SiameseBert + Composite;
+          src/review/code.py diff_code / review_change / merge_reviews; `code:` block in .traceability.yml;
+          review_flow reviews changed Python files. YES, REQ-04 field-level drift is caught: live PR #8 on
+          the demo repo BLOCKed from Python alone. Not done: CrossEncoderReranker (T5.3, optional) and
+          T5.5 (code_labels.csv + F1 evaluation). tests/test_code_alignment.py (33) + 3 bot tests.)
 
 ======================================================================
 M6  EVALUATION, DOCUMENTATION, SUBMISSION  (~2-3 days)   [§7]

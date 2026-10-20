@@ -5,14 +5,16 @@ docs/plan.md §4.4. One ReviewJob (from backend/app/routers/github.py) runs:
 
   1. check run      POST check-runs, status in_progress, on the head SHA
   2. config         .traceability.yml at the head SHA; missing -> neutral "skipping"
-  3. PR files       paginated; no configured spec / SRS / config change -> neutral
+  3. PR files       paginated; no configured spec / SRS / config / code change -> neutral
   4. artefacts      every configured spec at the merge base and at head ("added"
                     = no base); the SRS at head, written to a temp file and parsed
-                    by src/srs (.docx / .pdf / .md / .txt)
+                    by src/srs (.docx / .pdf / .md / .txt); with `code.paths` in the
+                    config, every changed Python file at both commits (M5)
   5. linked issue   GraphQL closingIssuesReferences + the closing-keyword regex on
                     the PR body; issue bodies -> acceptance criteria
-  6. engine         src.review.review_endpoint_changes (the same rules as the CLI,
-                    the GitHub Action and the simulated PR page)
+  6. engine         src.review.review_change: the spec diff (same rules as the CLI,
+                    the GitHub Action and the simulated PR page) plus, for code,
+                    the changed Python symbols scored with the code embedder
   7. complete       success (PASS) / neutral (WARN, or BLOCK under fail_on: never)
                     / failure (fails under fail_on); summary table + explanations
   8. comment        one PR comment, found by the <!-- traceability-bot --> marker
@@ -58,7 +60,9 @@ if str(ROOT) not in sys.path:
 
 from src.config import CONFIG_ALT_FILENAMES, CONFIG_FILENAME, ConfigError, TraceabilityConfig, load_config_text  # noqa: E402
 from src.parser import extract_endpoints_from_spec  # noqa: E402
-from src.review import PullRequestInfo, ReviewResult, Verdict, diff_endpoints, review_endpoint_changes  # noqa: E402
+from src.alignment.code_embedder import calibrated_thresholds, load_code_embedder  # noqa: E402
+from src.alignment.code_units import parse_hunks, path_matches  # noqa: E402
+from src.review import PullRequestInfo, ReviewResult, Verdict, diff_code, diff_endpoints, review_change  # noqa: E402
 from src.review.intent import find_linked_issues, parse_acceptance_criteria  # noqa: E402
 from src.srs import SRSExtractionError, extract_requirements_with_report  # noqa: E402
 from src.srs.readers.docx_reader import guard_docx_archive  # noqa: E402
@@ -67,6 +71,8 @@ logger = logging.getLogger(__name__)
 
 COMMENT_MARKER = "<!-- traceability-bot -->"
 MAX_LINKED_ISSUES = 5
+MAX_CODE_FILES = 60                     # changed Python files reviewed per PR
+MAX_CODE_FILE_BYTES = 512 * 1024
 
 SKIPPED, ERROR = "SKIPPED", "ERROR"
 
@@ -117,6 +123,9 @@ def check_title(result: ReviewResult) -> str:
         coverage = f" ({result.intent.coverage:.0%} covered)" if result.intent is not None else ""
         return f"WARN: the linked issue is only partly delivered{coverage}"
     n = len(result.diff.changes)
+    if result.code_diff is not None:
+        m = len(result.code_diff.changes)
+        return f"PASS: no requirement regressed ({n} endpoint, {m} code change{'s' if m != 1 else ''})"
     return f"PASS: no requirement regressed ({n} endpoint change{'s' if n != 1 else ''})"
 
 
@@ -124,15 +133,17 @@ def check_summary(result: ReviewResult, cfg: TraceabilityConfig, *, srs_path: st
                   spec_paths: Sequence[str], base_sha: str, head_sha: str,
                   issues: Sequence[Dict[str, Any]], conclusion: str) -> str:
     lines = [f"**{result.summary}**", ""]
+    code_changes = list(result.code_diff.changes) if result.code_diff is not None else []
     if result.violations:
-        lines += ["| Requirement | Endpoint | Change | Score base → head | Δ | Severity |",
+        lines += ["| Requirement | Endpoint / code | Change | Score base → head | Δ | Severity |",
                   "|---|---|---|---|---|---|"]
-        lines += [f"| `{v.requirement_id}` | `{v.endpoint_id}` | {v.change_status} | "
+        lines += [f"| `{v.requirement_id}` | {_artifact_cell(v.endpoint_id, v.kind, v.location)} | {v.change_status} | "
                   f"{v.score_v1:.3f} → {v.score_v2:.3f} | {v.delta:+.3f} | {v.severity} |"
                   for v in result.violations]
-    elif result.diff.changes:
-        lines += ["No requirement lost alignment. Changed endpoints:", ""]
-        lines += [f"- `{c.endpoint_id}` ({c.status})" for c in result.diff.changes]
+    elif result.diff.changes or code_changes:
+        lines += ["No requirement lost alignment. Changed endpoints and code:", ""]
+        lines += [f"- {_artifact_cell(c.endpoint_id, c.kind, c.location)} ({c.status})"
+                  for c in [*result.diff.changes, *code_changes]]
     else:
         lines.append("No endpoint changed between the base and head specification.")
     lines.append("")
@@ -149,10 +160,17 @@ def check_summary(result: ReviewResult, cfg: TraceabilityConfig, *, srs_path: st
     if result.verdict is Verdict.BLOCK and conclusion != "failure":
         lines += [f"> `fail_on: {cfg.fail_on.value}` in .traceability.yml: reported, not blocking.", ""]
 
+    code = f" · code {', '.join(f'`{g}`' for g in cfg.code.paths)}" if cfg.code is not None else ""
     lines.append(f"<sub>SRS `{srs_path}` ({n_requirements} requirements) · spec "
-                 f"{', '.join(f'`{p}`' for p in spec_paths)} · base `{base_sha[:7]}` → head `{head_sha[:7]}` · "
+                 f"{', '.join(f'`{p}`' for p in spec_paths)}{code} · base `{base_sha[:7]}` → head `{head_sha[:7]}` · "
                  f"fail_on `{cfg.fail_on.value}`</sub>")
     return "\n".join(lines)
+
+
+def _artifact_cell(artifact_id: str, kind: str, location: str) -> str:
+    if kind == "endpoint":
+        return f"`{artifact_id}`"
+    return f"`{artifact_id.split('::')[-1]}` ({kind}, `{location}`)"
 
 
 def check_text(result: ReviewResult) -> Optional[str]:
@@ -234,6 +252,7 @@ class ReviewFlow:
         http: Any = None,                                   # shared httpx.AsyncClient (tests: MockTransport)
         check_name: Optional[str] = None,
         embedder_factory: Callable[[], Any] = _default_embedder,
+        code_embedder_factory: Callable[[str], Any] = load_code_embedder,
         explainer_factory: Optional[Callable[[], Any]] = _default_explainer,
         session_factory: Callable[[], Any] = AsyncSessionLocal,
         client_kwargs: Optional[Dict[str, Any]] = None,
@@ -242,6 +261,7 @@ class ReviewFlow:
         self.http = http
         self.check_name = check_name or settings.GITHUB_CHECK_NAME
         self.embedder_factory = embedder_factory
+        self.code_embedder_factory = code_embedder_factory
         self.explainer_factory = explainer_factory
         self.session_factory = session_factory
         self.client_kwargs = client_kwargs or {}
@@ -334,20 +354,23 @@ class ReviewFlow:
         spec_paths = [repo_path(p) for p in cfg.openapi]
         srs_path = repo_path(cfg.srs)
         watched = [*spec_paths, srs_path, cfg_path]
-        if not touched_names & set(watched):
+        code_files = self._code_files(cfg, files)
+        if not touched_names & set(watched) and not code_files:
+            globs = [*watched, *(cfg.code.paths if cfg.code is not None else [])]
             raise SkipReview("No specification change",
                              "This pull request does not change "
-                             + ", ".join(f"`{p}`" for p in dict.fromkeys(watched)) + ", so there is nothing to review.")
+                             + ", ".join(f"`{p}`" for p in dict.fromkeys(globs)) + ", so there is nothing to review.")
 
         base_sha = await self._merge_base(gh, job)
         base_eps, head_eps = await self._endpoints(gh, job, spec_paths, by_name, base_sha)
+        code = await self._code_versions(gh, job, code_files, base_sha) if code_files else None
         reqs = await self._requirements(gh, job, srs_path, cfg)
         issues = await self._linked_issues(gh, job)
         intent = intent_units(issues)
 
         pr = PullRequestInfo(number=job.pr_number, title=job.pr_title, author=job.pr_author,
                              branch=job.head_ref, url=job.pr_url)
-        result = await asyncio.to_thread(self._run_engine, reqs, base_eps, head_eps, cfg, intent, pr)
+        result = await asyncio.to_thread(self._run_engine, reqs, base_eps, head_eps, cfg, intent, pr, code)
         conclusion = conclusion_for(result, cfg)
         return ReviewOutcome(
             verdict=result.verdict.value, conclusion=conclusion, title=check_title(result),
@@ -409,6 +432,44 @@ class ReviewFlow:
                                    f"{CONFIG_FILENAME}.")
         return base_eps, head_eps
 
+    @staticmethod
+    def _code_files(cfg: TraceabilityConfig, files: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Changed files under `code.paths` (empty without a `code:` block)."""
+        if cfg.code is None:
+            return []
+        c = cfg.code
+        return [f for f in files
+                if path_matches(f["filename"], c.paths, c.exclude)
+                or (f.get("previous_filename") and path_matches(f["previous_filename"], c.paths, c.exclude))]
+
+    async def _code_versions(self, gh: GitHubClient, job: ReviewJob, code_files: Sequence[Dict[str, Any]],
+                             base_sha: str):
+        """({path: base source}, {path: head source}, {path: (base lines, head lines)}, notes)."""
+        base: Dict[str, Optional[str]] = {}
+        head: Dict[str, Optional[str]] = {}
+        touched: Dict[str, Tuple[List[int], List[int]]] = {}
+        notes: List[str] = []
+        if len(code_files) > MAX_CODE_FILES:
+            notes.append(f"{len(code_files)} Python files changed; only the first {MAX_CODE_FILES} were reviewed.")
+        for f in code_files[:MAX_CODE_FILES]:
+            path, status = f["filename"], f.get("status")
+            if status == "removed":
+                base[path] = await gh.get_text(job.owner, job.repo, path, base_sha)
+                head[path] = None
+            else:
+                head[path] = await gh.get_text(job.owner, job.repo, path, job.head_sha)
+                base[path] = None if status == "added" else await gh.get_text(
+                    job.owner, job.repo, f.get("previous_filename") or path, base_sha)
+            if any(len(src or "") > MAX_CODE_FILE_BYTES for src in (base[path], head[path])):
+                notes.append(f"`{path}` is larger than {MAX_CODE_FILE_BYTES // 1024} KB; skipped.")
+                base.pop(path)
+                head.pop(path)
+                continue
+            if f.get("patch"):
+                b_lines, h_lines = parse_hunks(f["patch"])
+                touched[path] = (sorted(b_lines), sorted(h_lines))
+        return base, head, touched, notes
+
     async def _requirements(self, gh: GitHubClient, job: ReviewJob, srs_path: str,
                             cfg: TraceabilityConfig) -> List[Dict[str, Any]]:
         data = await gh.get_content(job.owner, job.repo, srs_path, job.head_sha)
@@ -456,11 +517,25 @@ class ReviewFlow:
                            "cross_repo": repo_name.lower() != here})
         return issues[:MAX_LINKED_ISSUES]
 
-    def _run_engine(self, reqs, base_eps, head_eps, cfg: TraceabilityConfig, intent, pr) -> ReviewResult:
-        diff = diff_endpoints(base_eps, head_eps)
+    def _run_engine(self, reqs, base_eps, head_eps, cfg: TraceabilityConfig, intent, pr, code=None) -> ReviewResult:
+        spec_diff = diff_endpoints(base_eps, head_eps)
         explainer = self.explainer_factory() if self.explainer_factory is not None else None
-        return review_endpoint_changes(
-            reqs, diff, thresholds=cfg.thresholds, embedder=self.embedder_factory(),
+        code_diff = code_embedder = code_thresholds = None
+        code_notes: List[str] = []
+        if code is not None:
+            base_files, head_files, touched, code_notes = code
+            code_diff, parse_notes = diff_code(base_files, head_files, touched_lines=touched)
+            code_notes = [*code_notes, *parse_notes]
+            if not code_diff.is_empty:
+                code_embedder = self.code_embedder_factory(cfg.code.model)
+                try:
+                    code_thresholds = cfg.code.thresholds_for(cfg.thresholds, calibrated_thresholds(code_embedder))
+                except ConfigError as exc:
+                    raise ReviewInputError(f"Invalid {CONFIG_FILENAME}", f"```\n{exc}\n```") from exc
+        return review_change(
+            reqs, spec_diff=spec_diff, code_diff=code_diff, code_notes=code_notes,
+            thresholds=cfg.thresholds, code_thresholds=code_thresholds,
+            embedder=self.embedder_factory(), code_embedder=code_embedder,
             explainer=explainer, intent=intent or None, pr=pr,
         )
 
