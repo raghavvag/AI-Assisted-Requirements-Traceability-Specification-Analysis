@@ -7,7 +7,7 @@ fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 
 # Database (async)
-sqlalchemy>=2.0.0
+sqlalchemy[asyncio]>=2.0.0   # [asyncio] pulls in greenlet, required by the async engine
 aiosqlite>=0.20.0
 alembic>=1.13.0
 
