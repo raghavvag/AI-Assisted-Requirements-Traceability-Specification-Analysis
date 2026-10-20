@@ -1,152 +1,198 @@
 // frontend/src/pages/BenchmarksPage.jsx
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { motion } from 'motion/react'
 import { BarChart3 } from 'lucide-react'
 import Plot from 'react-plotly.js'
+
 import { analysisApi } from '../services/api'
+import {
+  EmptyState, Loading, PageHeader, PageShell, Panel,
+  StatCard, StatGrid, PLOT_CONFIG, PLOT_THEME,
+} from '../components/ui'
 
 const METRICS = ['Precision', 'Recall', 'F1-Score', 'MAP']
 
+const METRIC_HELP = {
+  'Precision': 'of the endpoints retrieved, how many were correct',
+  'Recall':    'of the correct endpoints, how many were found',
+  'F1-Score':  'harmonic mean of precision and recall',
+  'MAP':       'ranking quality, independent of threshold',
+}
+
+const norm = (s) => s.toLowerCase().replace(/[-\s_]/g, '')
+
 export default function BenchmarksPage() {
   const { id } = useParams()
-  const [data, setData]     = useState(null)
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let alive = true
     analysisApi.benchmark(id)
-      .then(res => setData(res.data))
+      .then((res) => alive && setData(res.data))
       .catch(() => {})
-      .finally(() => setLoading(false))
+      .finally(() => alive && setLoading(false))
+    return () => { alive = false }
   }, [id])
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-full">
-      <span className="spinner" style={{width:48,height:48}} />
-    </div>
-  )
+  const model = useMemo(() => {
+    if (!data || data.message) return null
+    // The pipeline sends DataFrame.to_dict(): { metric: { model: value } }.
+    // Transpose to { model: { metric: value } }; a model-keyed report passes through.
+    const raw = data.report || {}
+    const metricKeyed = Object.keys(raw).some((k) => METRICS.some((m) => norm(m) === norm(k)))
+    const report = {}
+    if (metricKeyed) {
+      Object.entries(raw).forEach(([metric, byModel]) => {
+        Object.entries(byModel || {}).forEach(([m, v]) => { (report[m] ||= {})[metric] = v })
+      })
+    } else Object.assign(report, raw)
+    const models = Object.keys(report)
+    const tKey = models.find((k) => /transformer|mpnet/i.test(k)) || models[0]
+    const bKey = models.find((k) => /tfidf|tf-idf/i.test(k)) || models[1]
 
-  if (!data || data.message) return (
-    <div className="flex items-center justify-center h-full text-slate-500">
-      <div className="text-center">
-        <BarChart3 size={48} className="mx-auto mb-4 text-brand-600/40" />
-        <p className="text-lg font-medium text-white mb-2">No benchmark data</p>
-        <p className="text-sm">Run analysis with the default dataset (traceability_labels.csv required).</p>
-      </div>
-    </div>
-  )
-
-  // Parse report dict — keys are model names
-  const report = data.report || {}
-  const models = Object.keys(report)
-  const transformerKey = models.find(k => k.toLowerCase().includes('transformer') || k.toLowerCase().includes('mpnet')) || models[0]
-  const tfidfKey       = models.find(k => k.toLowerCase().includes('tfidf') || k.toLowerCase().includes('tf-idf')) || models[1]
-
-  function getScore(modelKey, metric) {
-    if (!modelKey || !report[modelKey]) return 0
-    const row = report[modelKey]
-    const normalized = metric.toLowerCase().replace('-','').replace(' ','')
-    for (const [k,v] of Object.entries(row)) {
-      if (k.toLowerCase().replace('-','').replace(' ','') === normalized) return Number(v) || 0
+    const score = (key, metric) => {
+      const row = key && report[key]
+      if (!row) return 0
+      const want = norm(metric)
+      for (const [k, v] of Object.entries(row)) {
+        if (norm(k) === want) return Number(v) || 0
+      }
+      return 0
     }
-    return 0
-  }
 
-  const transformerScores = METRICS.map(m => getScore(transformerKey, m))
-  const tfidfScores       = METRICS.map(m => getScore(tfidfKey, m))
+    return {
+      tKey, bKey,
+      transformer: METRICS.map((m) => score(tKey, m)),
+      tfidf: METRICS.map((m) => score(bKey, m)),
+      perReq: data.per_requirement || [],
+      threshold: data.eval_threshold,
+    }
+  }, [data])
 
-  const perReq = data.per_requirement || []
+  if (loading) return <PageShell><Loading label="Loading benchmark…" /></PageShell>
+
+  if (!model) return (
+    <PageShell>
+      <PageHeader title="Evaluation Metrics" subtitle="Transformer vs TF-IDF baseline" />
+      <Panel fill>
+        <EmptyState
+          icon={BarChart3}
+          title="No benchmark data"
+          description="Metrics need a ground-truth label file (data/ground_truth/traceability_labels.csv) that matches the requirement IDs in your SRS. Re-run the analysis once that is in place."
+        />
+      </Panel>
+    </PageShell>
+  )
+
+  const { transformer, tfidf, perReq, threshold } = model
 
   return (
-    <div className="flex flex-col h-full p-6 gap-5 overflow-y-auto">
-      <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }}>
-        <h1 className="text-2xl font-bold gradient-text">IR Evaluation Metrics</h1>
-        <p className="text-sm text-slate-400">Transformer vs TF-IDF baseline · Precision, Recall, F1, MAP</p>
-      </motion.div>
+    <PageShell scroll>
+      <PageHeader
+        title="Evaluation Metrics"
+        subtitle={`Information-retrieval accuracy vs a TF-IDF keyword baseline${threshold ? ` · τ = ${threshold}` : ''}`}
+      />
 
-      {/* Top-level metric cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <StatGrid cols={4}>
         {METRICS.map((metric, i) => {
-          const tScore = transformerScores[i]
-          const bScore = tfidfScores[i]
-          const delta  = tScore - bScore
+          const t = transformer[i]
+          const delta = t - tfidf[i]
           return (
-            <div key={metric} className="metric-card">
-              <p className="text-[10px] text-slate-500 uppercase tracking-wider">{metric}</p>
-              <p className="text-2xl font-bold text-brand-400">{tScore.toFixed(4)}</p>
-              <p className={`text-xs ${delta >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {delta >= 0 ? '+' : ''}{delta.toFixed(4)} vs TF-IDF
-              </p>
-            </div>
+            <StatCard
+              key={metric}
+              label={metric}
+              value={t.toFixed(3)}
+              hint={`${delta >= 0 ? '+' : ''}${delta.toFixed(3)} vs TF-IDF · ${METRIC_HELP[metric]}`}
+              tone={delta > 0 ? 'good' : delta < 0 ? 'bad' : 'info'}
+            />
           )
         })}
-      </div>
+      </StatGrid>
 
-      {/* Bar chart */}
-      <div className="glass rounded-2xl p-4" style={{height:340}}>
-        <Plot
-          data={[
-            {
-              type: 'bar', name: 'Transformer (ours)',
-              x: METRICS, y: transformerScores,
-              marker: { color: '#3b82f6' },
-              text: transformerScores.map(s => s.toFixed(4)),
-              textposition: 'outside', textfont: { color:'#93c5fd', size:11 },
-            },
-            {
-              type: 'bar', name: 'TF-IDF Baseline',
-              x: METRICS, y: tfidfScores,
-              marker: { color: '#475569' },
-              text: tfidfScores.map(s => s.toFixed(4)),
-              textposition: 'outside', textfont: { color:'#94a3b8', size:11 },
-            },
-          ]}
-          layout={{
-            barmode: 'group',
-            title: { text:'Transformer vs TF-IDF Retrieval Metrics', font:{ color:'#e2e8f0' } },
-            paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
-            font: { color:'#94a3b8' },
-            yaxis: { range:[0,1.15], gridcolor:'rgba(255,255,255,0.05)', title:'Score' },
-            legend: { orientation:'h', yanchor:'bottom', y:1.02, xanchor:'right', x:1, font:{ color:'#94a3b8' } },
-            margin: { l:50,r:20,t:50,b:40 },
-            autosize: true,
-          }}
-          config={{ responsive:true, displayModeBar:false }}
-          style={{ width:'100%', height:'100%' }}
-          useResizeHandler
-        />
-      </div>
+      <Panel
+        title="Transformer vs TF-IDF"
+        hint="Higher is better. The transformer's advantage comes mostly from recall — it finds relevant endpoints that share no keywords."
+        className="shrink-0"
+        bodyClass="overflow-hidden"
+      >
+        <div style={{ height: 320 }} className="w-full overflow-hidden">
+          <Plot
+            data={[
+              {
+                type: 'bar', name: 'Transformer (ours)',
+                x: METRICS, y: transformer,
+                marker: { color: '#22d3ee', line: { width: 0 } },
+                text: transformer.map((s) => s.toFixed(3)),
+                textposition: 'outside', textfont: { color: '#a5f3fc', size: 11 },
+                hovertemplate: '<b>%{x}</b><br>Transformer %{y:.4f}<extra></extra>',
+              },
+              {
+                type: 'bar', name: 'TF-IDF baseline',
+                x: METRICS, y: tfidf,
+                marker: { color: '#2b2e34', line: { width: 0 } },
+                text: tfidf.map((s) => s.toFixed(3)),
+                textposition: 'outside', textfont: { color: 'rgba(255,255,255,0.45)', size: 11 },
+                hovertemplate: '<b>%{x}</b><br>TF-IDF %{y:.4f}<extra></extra>',
+              },
+            ]}
+            layout={{
+              ...PLOT_THEME,
+              barmode: 'group',
+              bargap: 0.42,
+              bargroupgap: 0.12,
+              yaxis: {
+                range: [0, 1.16], gridcolor: 'rgba(255,255,255,0.05)', zeroline: false,
+                tickfont: { size: 10, color: 'rgba(255,255,255,0.4)' },
+              },
+              xaxis: { showgrid: false, tickfont: { size: 12, color: 'rgba(255,255,255,0.6)' } },
+              legend: {
+                orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1,
+                font: { color: 'rgba(255,255,255,0.5)', size: 11 },
+              },
+              margin: { l: 44, r: 16, t: 42, b: 38 },
+            }}
+            config={PLOT_CONFIG}
+            style={{ width: '100%', height: '100%' }}
+            useResizeHandler
+          />
+        </div>
+      </Panel>
 
-      {/* Per-requirement table */}
       {perReq.length > 0 && (
-        <div className="glass rounded-2xl p-4">
-          <h2 className="text-sm font-semibold text-white mb-3">Per-Requirement Breakdown</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-slate-400">
-              <thead>
-                <tr className="border-b border-white/5">
-                  {Object.keys(perReq[0]).map(col => (
-                    <th key={col} className="text-left py-2 px-3 text-[10px] uppercase tracking-wider text-slate-600">
-                      {col}
-                    </th>
+        <Panel
+          title="Per-requirement breakdown"
+          hint="Where the average comes from — a low row is a requirement whose endpoints are hard to retrieve."
+          className="shrink-0"
+          bodyClass="overflow-x-auto"
+        >
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-surface-900/90 backdrop-blur">
+              <tr className="border-b border-white/8">
+                {Object.keys(perReq[0]).map((col) => (
+                  <th key={col} className="text-left py-2.5 px-4 text-[10px] uppercase tracking-[0.12em] text-white/35 font-semibold whitespace-nowrap">
+                    {col.replace(/_/g, ' ')}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {perReq.map((row, i) => (
+                <tr key={i} className="border-b border-white/5 hover:bg-white/[0.025] transition-colors">
+                  {Object.entries(row).map(([k, v]) => (
+                    <td key={k} className={`py-2.5 px-4 whitespace-nowrap ${
+                      typeof v === 'number'
+                        ? `font-mono tnum ${v >= 0.7 ? 'text-compliant' : v >= 0.4 ? 'text-partial' : 'text-noncompliant'}`
+                        : 'text-white/70'}`}>
+                      {typeof v === 'number' ? v.toFixed(3) : String(v)}
+                    </td>
                   ))}
                 </tr>
-              </thead>
-              <tbody>
-                {perReq.map((row, i) => (
-                  <tr key={i} className="border-b border-white/5 hover:bg-white/2">
-                    {Object.entries(row).map(([k, v]) => (
-                      <td key={k} className="py-2 px-3 font-mono">
-                        {typeof v === 'number' ? v.toFixed(4) : String(v)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
       )}
-    </div>
+    </PageShell>
   )
 }

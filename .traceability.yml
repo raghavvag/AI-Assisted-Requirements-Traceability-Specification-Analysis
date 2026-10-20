@@ -1,0 +1,19 @@
+# Semantic traceability gate for THIS repository (built-in demo dataset).
+# Schema and defaults: src/config.py · design: docs/plan.md §3.3
+version: 1
+srs: data/requirements/ecommerce_srs.md
+openapi: data/api_specs/store_v1.json
+thresholds:
+  compliant: 0.55
+  partial: 0.40
+  drift: -0.10
+  regression_strong: -0.05
+  regression_weak: -0.08
+  strong_relevance: 0.60
+  relevance_floor: 0.35
+  link_top_k: 3
+fail_on: block
+srs_extraction:
+  id_pattern: null
+  include_nfr: true
+  extra_blocklist: []

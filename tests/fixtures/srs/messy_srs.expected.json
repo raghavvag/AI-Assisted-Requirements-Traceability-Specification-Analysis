@@ -1,0 +1,101 @@
+{
+  "fixture": "messy_srs.docx",
+  "requirements": [
+    {
+      "id": "FR1",
+      "title": "User Login",
+      "type": "functional",
+      "priority": null,
+      "text": "User Login. The system shall authenticate users with an email address and password."
+    },
+    {
+      "id": "FR-2",
+      "title": "The system shall lock an account after five consecutive failed login attempts",
+      "type": "functional",
+      "priority": null,
+      "text": "The system shall lock an account after five consecutive failed login attempts."
+    },
+    {
+      "id": "FR-3",
+      "title": "Password Reset",
+      "type": "functional",
+      "priority": null,
+      "text": "Password Reset. Users must be able to reset a forgotten password via a time-limited email link, as per FR-2."
+    },
+    {
+      "id": "REQ-4",
+      "title": "Session timeout",
+      "type": "functional",
+      "priority": null,
+      "text": "Session timeout. Sessions shall expire after 30 minutes of inactivity and require re-authentication."
+    },
+    {
+      "id": "FR-5.1",
+      "title": "Profile update",
+      "type": "functional",
+      "priority": "High",
+      "text": "Profile update. The system shall let users update their display name and avatar. Acceptance criteria: Changes are visible after refresh."
+    },
+    {
+      "id": "FR-5.2",
+      "title": "Data export",
+      "type": "functional",
+      "priority": "Medium",
+      "text": "Data export. The system shall export all personal data as JSON. The export must complete within 24 hours."
+    },
+    {
+      "id": "FR-5.3",
+      "title": "The system shall permanently delete an account within",
+      "type": "functional",
+      "priority": "High",
+      "text": "The system shall permanently delete an account within 30 days of a verified request."
+    },
+    {
+      "id": "FR-5.4",
+      "title": "Change audit trail",
+      "type": "functional",
+      "priority": "Low",
+      "text": "Change audit trail. The system shall keep an audit trail of profile changes. Audit entries must be retained for one year."
+    },
+    {
+      "id": "FR-6",
+      "title": "Audit Logging",
+      "type": "functional",
+      "priority": null,
+      "text": "Audit Logging. The system shall record every administrative action with a timestamp and actor."
+    },
+    {
+      "id": "FR-7",
+      "title": "Email Notifications",
+      "type": "functional",
+      "priority": null,
+      "text": "Email Notifications. The system shall email users when their password changes."
+    },
+    {
+      "id": "NFR-1",
+      "title": "Response Time",
+      "type": "non_functional",
+      "priority": null,
+      "text": "Response Time. Ninety-five percent of API requests shall complete within 300 milliseconds."
+    },
+    {
+      "id": "NFR-2",
+      "title": "Encryption",
+      "type": "non_functional",
+      "priority": null,
+      "text": "Encryption. All personal data shall be encrypted at rest using AES-256."
+    }
+  ],
+  "duplicates": [
+    "FR-2"
+  ],
+  "must_not_contain": [
+    "silently",
+    "Deletion and audit",
+    "Req ID",
+    "FR-99",
+    "placeholder",
+    "Duplicate entry",
+    "Account Service SRS"
+  ]
+}

@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +76,64 @@ class DocumentOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# SRS extraction (industrial .docx / .pdf / .md ingestion)
+# ---------------------------------------------------------------------------
+
+class RequirementSource(BaseModel):
+    file: str = ""
+    format: str = ""
+    locator: str = ""
+
+
+class ExtractedRequirement(BaseModel):
+    id: str
+    title: str
+    text: str
+    type: Optional[str] = None
+    priority: Optional[str] = None
+    section: Optional[str] = None
+    raw_id: Optional[str] = None
+    id_source: Optional[str] = None
+    acceptance_criteria: Optional[str] = None
+    rationale: Optional[str] = None
+    origin: Optional[str] = None
+    strategy: Optional[str] = None
+    source: Optional[RequirementSource] = None
+
+
+class ExtractionReportOut(BaseModel):
+    source_file: str = ""
+    format: str = ""
+    n_requirements: int = 0
+    n_blocks: int = 0
+    by_strategy: Dict[str, int] = {}
+    skipped: Dict[str, int] = {}
+    duplicates: List[str] = []
+    warnings: List[str] = []
+
+
+class ExtractionSummary(BaseModel):
+    """Returned with an SRS upload so the UI can confirm what was found."""
+    n_requirements: int
+    format: str
+    by_strategy: Dict[str, int] = {}
+    n_warnings: int = 0
+    warnings: List[str] = []
+    requirement_ids: List[str] = []
+
+
+class DocumentUploadOut(DocumentOut):
+    extraction: Optional[ExtractionSummary] = None
+
+
+class SrsRequirementsOut(BaseModel):
+    filename: str
+    is_default: bool = False
+    requirements: List[ExtractedRequirement]
+    report: ExtractionReportOut
+
+
+# ---------------------------------------------------------------------------
 # Analysis Pipeline
 # ---------------------------------------------------------------------------
 
@@ -92,6 +150,10 @@ class RequirementNode(BaseModel):
     id: str
     title: str
     text: str
+    # present when the SRS was a formal document (.docx / .pdf)
+    type: Optional[str] = None
+    priority: Optional[str] = None
+    section: Optional[str] = None
 
 
 class EndpointNode(BaseModel):
@@ -145,18 +207,24 @@ class DriftResponse(BaseModel):
 
 class PRViolation(BaseModel):
     requirement_id: str
+    requirement_text: str = ""
     endpoint_id: str
+    change_status: str = "modified"          # added | removed | modified
     score_v1: float
     score_v2: float
     delta: float
     severity: str
-    explanation: str
+    endpoint_change_description: str = ""
+    explanation: str = ""
 
 
 class PRReviewResponse(BaseModel):
     scenario: str
+    verdict: str                             # PASS | WARN | BLOCK
     approved: bool
+    summary: str = ""
     violations: List[PRViolation]
+    changes: List[Dict[str, Any]] = []
     review_comment: str   # GitHub-style markdown
 
 

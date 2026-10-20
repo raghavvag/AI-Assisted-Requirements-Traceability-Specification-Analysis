@@ -1,0 +1,27 @@
+{
+  "dataset": {
+    "srs": "data/requirements/ecommerce_srs.md",
+    "spec": "data/api_specs/store_v1.json",
+    "ground_truth": "data/ground_truth/traceability_labels.csv",
+    "n_requirements": 10,
+    "n_endpoints": 20
+  },
+  "model": "all-mpnet-base-v2",
+  "eval_threshold": 0.4,
+  "transformer": {
+    "precision": 0.6202,
+    "recall": 1.0,
+    "f1": 0.7098,
+    "n_requirements": 10.0,
+    "map": 1.0
+  },
+  "tfidf": {
+    "precision": 0.5,
+    "recall": 0.275,
+    "f1": 0.34,
+    "n_requirements": 10.0,
+    "map": 1.0
+  },
+  "recorded": "2026-10-16",
+  "tolerance": 0.005
+}

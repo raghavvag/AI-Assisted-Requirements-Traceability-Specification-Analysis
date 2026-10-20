@@ -5,7 +5,7 @@ Responsibility: Parse and normalise both input artefact types into clean,
                 semantically rich text chunks ready for embedding.
 
 Inputs:
-  - Natural language SRS Markdown file (data/requirements/ecommerce_srs.md)
+  - SRS document: .docx / .pdf / .md / .txt (data/requirements/ecommerce_srs.md)
   - OpenAPI 3.0 JSON/YAML spec file    (data/api_specs/store_v*.json)
 
 Outputs:
@@ -17,9 +17,12 @@ import json
 import re
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import yaml
+
+if TYPE_CHECKING:  # pragma: no cover
+    from src.srs.options import ExtractionOptions
 
 logger = logging.getLogger(__name__)
 
@@ -28,65 +31,33 @@ logger = logging.getLogger(__name__)
 # SRS Parser
 # ---------------------------------------------------------------------------
 
-def extract_requirements(filepath: str) -> List[Dict]:
+def extract_requirements(filepath: str, options: Optional["ExtractionOptions"] = None) -> List[Dict]:
     """
-    Parse a structured SRS Markdown file into a list of requirement dicts.
+    Parse an SRS document into a list of requirement dicts.
 
-    The file must contain blocks prefixed with 'REQ-{N}:' as separators.
-    Each block is extracted into {id, title, text}.
+    Supported formats (dispatched on the file extension, see src/srs/):
+      - .docx  formal Word SRS: requirement tables, tagged headings/paragraphs
+               (FR-1, REQ-04, [NFR-2], BNK-REQ-01), boilerplate removed
+      - .pdf   text-layer PDF exported from an SRS
+      - .md / .txt  the original "REQ-N: Title" + body format (unchanged
+               behaviour), falling back to the structured strategies
 
     Args:
-        filepath: Absolute or relative path to the SRS .md file.
+        filepath: Absolute or relative path to the SRS file.
+        options:  Optional src.srs.ExtractionOptions (custom ID pattern, ...).
 
     Returns:
-        List of dicts: [{"id": "REQ-01", "title": "...", "text": "..."}]
+        List of dicts. Always has {"id", "title", "text"}; also carries
+        type / priority / section / source metadata.
 
     Raises:
         FileNotFoundError: If the SRS file does not exist.
-        ValueError: If no requirement blocks are found in the file.
+        ValueError: If no requirements are found or the file cannot be read
+                    (src.srs.SRSExtractionError, which subclasses ValueError).
     """
-    path = Path(filepath)
-    if not path.exists():
-        raise FileNotFoundError(f"SRS file not found: {filepath}")
+    from src.srs import extract_requirements as _extract
 
-    raw_text = path.read_text(encoding="utf-8")
-
-    # Split on the requirement-ID pattern. Accepts a bare "REQ-4:" as well as a
-    # domain-prefixed id such as "TF-REQ-01:" or "AUTH-REQ-12:" (common in real
-    # SRS documents). Leading Markdown heading markers ("## ") are tolerated.
-    pattern = re.compile(
-        r"^\s{0,3}#{0,4}\s*((?:[A-Za-z][A-Za-z0-9]{0,7}-)?REQ-\d+):\s*(.+)$",
-        re.MULTILINE,
-    )
-    matches = list(pattern.finditer(raw_text))
-
-    if not matches:
-        raise ValueError(
-            f"No requirement blocks ((PREFIX-)REQ-N: ...) found in: {filepath}"
-        )
-
-    requirements = []
-    for i, match in enumerate(matches):
-        req_id = match.group(1).strip()         # e.g. "REQ-04"
-        req_title = match.group(2).strip()       # e.g. "Refund Transaction Integrity"
-
-        # Extract body text: from end of this match to start of next match (or EOF)
-        body_start = match.end()
-        body_end = matches[i + 1].start() if i + 1 < len(matches) else len(raw_text)
-        body_text = raw_text[body_start:body_end].strip()
-
-        # Compose full semantic text: title + body sentences
-        full_text = f"{req_title}. {body_text}"
-        # Collapse multiple whitespace / newlines for clean embedding input
-        full_text = re.sub(r"\s+", " ", full_text).strip()
-
-        requirements.append({
-            "id": req_id,
-            "title": req_title,
-            "text": full_text,
-        })
-        logger.debug("Parsed %s: %s", req_id, req_title)
-
+    requirements = _extract(filepath, options)
     logger.info("Extracted %d requirements from %s", len(requirements), filepath)
     return requirements
 
@@ -194,7 +165,6 @@ def _extract_schema_text(schema: Dict, parts: List[str], depth: int = 0):
     if depth > 2 or not isinstance(schema, dict):
         return
 
-    schema_type = schema.get("type", "")
     schema_desc = schema.get("description", "")
     if schema_desc:
         parts.append(schema_desc.strip())
@@ -214,53 +184,88 @@ def _extract_schema_text(schema: Dict, parts: List[str], depth: int = 0):
         _extract_schema_text(items_schema, parts, depth + 1)
 
 
-def extract_endpoints(filepath: str) -> List[Dict]:
+_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options"}
+
+
+def _resolve_local_refs(node, root: Dict, _seen: Optional[frozenset] = None):
     """
-    Parse an OpenAPI spec file and extract all endpoints as semantic text chunks.
+    Inline local JSON references ("$ref": "#/components/schemas/Refund") so a
+    spec dict fetched from somewhere other than a file (GitHub API, git show)
+    gives the same endpoint text as a prance-resolved file. Remote refs are left
+    as they are; reference cycles are cut at the first repetition.
+    """
+    seen = _seen or frozenset()
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/"):
+            if ref in seen:
+                return {}
+            target = root
+            for part in ref[2:].split("/"):
+                part = part.replace("~1", "/").replace("~0", "~")
+                if not isinstance(target, dict) or part not in target:
+                    return node                                  # dangling ref: keep as-is
+                target = target[part]
+            merged = {**_resolve_local_refs(target, root, seen | {ref}),
+                      **{k: v for k, v in node.items() if k != "$ref"}}
+            return merged
+        return {k: _resolve_local_refs(v, root, seen) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_resolve_local_refs(v, root, seen) for v in node]
+    return node
+
+
+def extract_endpoints_from_spec(spec: Dict, source: str = "") -> List[Dict]:
+    """
+    Extract all endpoints from an already-loaded OpenAPI 3.x / Swagger 2.0 spec.
+
+    This is the format-independent core: the CLI, the review engine and the
+    GitHub App pass specs they read from git or the GitHub API straight in,
+    without writing temp files. Local `$ref`s are resolved here.
 
     Each endpoint produces a dict with:
         - id:     Canonical identifier, e.g. "POST /api/v1/refund"
         - method: HTTP verb in uppercase, e.g. "POST"
         - path:   URL path string, e.g. "/api/v1/refund"
         - text:   Full semantic text representation for embedding
+        - operation_id, summary
 
     Args:
-        filepath: Path to the OpenAPI .json or .yaml spec file.
+        spec:   Parsed spec as a dict.
+        source: Label for log and error messages (file path, "git:HEAD~1:openapi.yaml", ...).
 
     Returns:
         List of endpoint dicts sorted by (path, method).
 
     Raises:
-        FileNotFoundError: If the spec file does not exist.
-        ValueError: If the spec has no 'paths' key.
+        ValueError: If `spec` is not a mapping or has no 'paths' section.
     """
-    spec = load_openapi_spec(filepath)
+    label = source or "<spec>"
+    if not isinstance(spec, dict):
+        raise ValueError(f"OpenAPI spec must be a mapping, got {type(spec).__name__}: {label}")
 
     paths = spec.get("paths", {})
-    if not paths:
-        raise ValueError(f"OpenAPI spec has no 'paths' section: {filepath}")
+    if not paths or not isinstance(paths, dict):
+        raise ValueError(f"OpenAPI spec has no 'paths' section: {label}")
 
-    # HTTP methods to extract (excludes 'parameters' key at path level)
-    http_methods = {"get", "post", "put", "patch", "delete", "head", "options"}
+    if '"$ref": "#/' in json.dumps(paths, default=str):
+        paths = _resolve_local_refs(paths, spec)
 
     endpoints = []
     for path_str, path_item in paths.items():
         if not isinstance(path_item, dict):
             continue
         for method, operation in path_item.items():
-            if method.lower() not in http_methods:
-                continue
-            if not isinstance(operation, dict):
+            # path-level keys such as "parameters" / "summary" are not operations
+            if method.lower() not in _HTTP_METHODS or not isinstance(operation, dict):
                 continue
 
             endpoint_id = f"{method.upper()} {path_str}"
-            text = _build_endpoint_text(method, path_str, operation)
-
             endpoints.append({
                 "id": endpoint_id,
                 "method": method.upper(),
                 "path": path_str,
-                "text": text,
+                "text": _build_endpoint_text(method, path_str, operation),
                 "operation_id": operation.get("operationId", ""),
                 "summary": operation.get("summary", ""),
             })
@@ -268,10 +273,22 @@ def extract_endpoints(filepath: str) -> List[Dict]:
 
     # Stable sort: alphabetical by path, then method
     endpoints.sort(key=lambda e: (e["path"], e["method"]))
-    logger.info(
-        "Extracted %d endpoints from %s", len(endpoints), filepath
-    )
+    logger.info("Extracted %d endpoints from %s", len(endpoints), label)
     return endpoints
+
+
+def extract_endpoints(filepath: str) -> List[Dict]:
+    """
+    Parse an OpenAPI spec file (.json / .yaml) and extract all endpoints.
+
+    Backward-compatible wrapper: loads the file (prance $ref resolution, raw
+    JSON/YAML fallback) and delegates to `extract_endpoints_from_spec`.
+
+    Raises:
+        FileNotFoundError: If the spec file does not exist.
+        ValueError: If the spec has no 'paths' key.
+    """
+    return extract_endpoints_from_spec(load_openapi_spec(filepath), source=str(filepath))
 
 
 # ---------------------------------------------------------------------------

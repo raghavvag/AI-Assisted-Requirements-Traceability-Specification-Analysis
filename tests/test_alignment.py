@@ -5,13 +5,11 @@ Verifies the v1.0 pipeline, re-expressed against src/alignment/, produces the
 same conclusions (REQ-04 -> refund endpoint, high coverage on the compliant spec).
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
 
 from src.alignment import (
     EmbeddingAlignmentScorer,
@@ -19,7 +17,7 @@ from src.alignment import (
     SRSContextSource,
     ThresholdAlignmentGate,
 )
-from src.alignment.base import AlignmentResult, GatePolicy, GateVerdict
+from src.alignment.base import GatePolicy, GateVerdict
 
 SRS_PATH = ROOT / "data" / "requirements" / "ecommerce_srs.md"
 V1_PATH = ROOT / "data" / "api_specs" / "store_v1.json"

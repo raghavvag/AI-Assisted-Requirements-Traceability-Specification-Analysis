@@ -12,7 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.database import init_db
-from app.routers import auth, projects, analysis
+from app.routers import auth, projects, analysis, github
+from app.services.github import GitHubAppAuth, GitHubAppConfigError
+from app.services.github.review_flow import ReviewFlow
 from app.services.vector_store import get_vector_store
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +39,16 @@ async def lifespan(app: FastAPI):
         )
     else:
         logger.info("GOOGLE_CLIENT_ID loaded: ...%s", gcid[-24:])
+    github_auth = None
+    if settings.github_app_configured:
+        try:
+            github_auth = GitHubAppAuth.from_settings(settings)
+            github.set_review_handler(ReviewFlow(github_auth))
+            logger.info("GitHub App configured (app id %s); webhook at /api/github/webhook", settings.GITHUB_APP_ID)
+        except GitHubAppConfigError as exc:
+            logger.error("GitHub App settings are present but unusable: %s. PR reviews are disabled.", exc)
+    else:
+        logger.info("GitHub App not configured; /api/github/webhook will answer 503 (see manual.md section D).")
 
     # Init Qdrant collection
     vs = get_vector_store()
@@ -49,6 +61,8 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down...")
+    if github_auth is not None:
+        await github_auth.aclose()
 
 
 app = FastAPI(
@@ -83,6 +97,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(analysis.router)
+app.include_router(github.router)
 
 
 # ---------------------------------------------------------------------------
@@ -109,5 +124,8 @@ async def health():
                 else "groq" if settings.GROQ_API_KEY
                 else "template-fallback"
             ),
+            "github_app_configured": settings.github_app_configured,
+            "github_app_id_loaded": bool(settings.GITHUB_APP_ID.strip()),
+            "github_webhook_secret_loaded": bool(settings.GITHUB_WEBHOOK_SECRET),
         },
     }

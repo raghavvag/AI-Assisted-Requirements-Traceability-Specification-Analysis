@@ -1,0 +1,114 @@
+# Reusable semantic compliance gate (docs/plan.md §5.3).
+#
+#   - uses: actions/checkout@v4
+#     with: { fetch-depth: 0 }          # the base commit must be in the clone
+#   - uses: raghavvag/AI-Assisted-Requirements-Traceability-Specification-Analysis@v1
+#     with: { config: .traceability.yml, fail-on: block }
+#
+# Reviews the first `openapi:` spec named in the config: the version at the base commit
+# against the checked-out one, scored against the `srs:` requirements. The job fails when
+# the verdict reaches `fail-on`. Same engine as the GitHub App and `python -m src.cli review`.
+name: Requirements Traceability Gate
+description: Block API changes that weaken alignment with the SRS requirements (semantic, embedding-based).
+author: raghavvag
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  config:
+    description: Path to .traceability.yml, relative to the repository root.
+    default: .traceability.yml
+  base-ref:
+    description: >-
+      Commit or ref to compare against. Default: the merge base with the pull request's base
+      branch, or the previous commit (github.event.before) on push.
+    default: ""
+  fail-on:
+    description: "block | critical | never. Default: fail_on from the config, else block."
+    default: ""
+  python-version:
+    description: Python version to run the engine with.
+    default: "3.11"
+
+outputs:
+  verdict:
+    description: PASS, WARN or BLOCK.
+    value: ${{ steps.review.outputs.verdict }}
+  exit-code:
+    description: 0 = passed, 1 = failed under fail-on.
+    value: ${{ steps.review.outputs.exit-code }}
+  report:
+    description: Path to the Markdown report.
+    value: ${{ steps.review.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Cache Hugging Face models
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/huggingface
+        key: hf-all-mpnet-base-v2-${{ runner.os }}-v1
+
+    - name: Install the traceability engine
+      shell: bash
+      run: |
+        python -m pip install --quiet --upgrade pip
+        pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+        pip install --quiet -r "$GITHUB_ACTION_PATH/requirements.txt"
+
+    - name: Review the specification change
+      id: review
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+        CONFIG: ${{ inputs.config }}
+        BASE_REF: ${{ inputs.base-ref }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PUSH_BEFORE: ${{ github.event.before }}
+      run: |
+        set -uo pipefail
+        out="$RUNNER_TEMP/traceability"; mkdir -p "$out"
+
+        # Spec path from the config, made relative to the repository root for `git show`.
+        spec_abs=$(python -c "import sys; from src.config import load_config; print(load_config(sys.argv[1]).openapi_paths[0])" "$CONFIG")
+        spec=$(realpath --relative-to="$(git rev-parse --show-toplevel)" "$spec_abs")
+
+        base="${BASE_REF:-${PR_BASE_SHA:-$PUSH_BEFORE}}"
+        if [ -n "$base" ] && [ -n "$PR_BASE_SHA" ] && [ -z "$BASE_REF" ]; then
+          base=$(git merge-base "$base" HEAD 2>/dev/null || echo "$base")   # same rule as the GitHub App
+        fi
+        base_spec=none
+        if [ -n "$base" ] && ! [[ "$base" =~ ^0+$ ]] && git cat-file -e "$base:$spec" 2>/dev/null; then
+          base_spec="$out/base-spec.${spec##*.}"
+          git show "$base:$spec" > "$base_spec"
+          echo "Comparing $spec at ${base:0:7} with the checked-out version."
+        else
+          echo "::notice::No base version of $spec (new spec, or the base commit is not in the clone; use fetch-depth: 0)."
+        fi
+
+        args=(--config "$CONFIG" --base-spec "$base_spec" --head-spec "$spec_abs")
+        [ -n "$FAIL_ON" ] && args+=(--fail-on "$FAIL_ON")
+        python -m src.cli review "${args[@]}" --format md | tee "$out/report.md"
+        code=${PIPESTATUS[0]}
+        python -m src.cli review "${args[@]}" --format json --no-explain --fail-on never --output "$out/report.json" > /dev/null || true
+        verdict=$(python -c "import json, sys; print(json.load(open(sys.argv[1], encoding='utf-8'))['verdict'])" "$out/report.json" 2>/dev/null || echo ERROR)
+
+        cat "$out/report.md" >> "$GITHUB_STEP_SUMMARY"
+        {
+          echo "verdict=$verdict"
+          echo "exit-code=$code"
+          echo "report=$out/report.md"
+        } >> "$GITHUB_OUTPUT"
+        if [ "$code" -eq 1 ]; then
+          echo "::error title=Requirements Traceability::Verdict $verdict: the change weakens requirements the baseline satisfied."
+        elif [ "$code" -ne 0 ]; then
+          echo "::error title=Requirements Traceability::The review could not run (exit $code); see the log above."
+        fi
+        exit "$code"

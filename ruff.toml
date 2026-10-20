@@ -1,0 +1,14 @@
+# Lint config for CI (.github/workflows/ci.yml). Ruff's default rule set: pyflakes
+# plus the pycodestyle errors that are not style opinions.
+target-version = "py311"
+line-length = 120
+extend-exclude = ["frontend", "backend/uploads", "data"]
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+
+[lint.per-file-ignores]
+# These put the repo root on sys.path before importing src/.
+"tests/*" = ["E402"]
+"scripts/*" = ["E402"]
+"backend/app/services/pipeline.py" = ["E402"]

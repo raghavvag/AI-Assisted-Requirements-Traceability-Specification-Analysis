@@ -27,7 +27,7 @@ Usage:
 import hashlib
 import logging
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd

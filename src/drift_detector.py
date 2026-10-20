@@ -16,9 +16,8 @@ Algorithm:
 
 import logging
 import os
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
-import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 
@@ -172,14 +171,19 @@ def compute_drift_report(
     return drift_df
 
 
-def _normalise_endpoint_path(ep_id: str) -> str:
+def normalise_endpoint_path(ep_id: str) -> str:
     """
     Normalise endpoint ID by removing API version segment for cross-version matching.
     E.g.: "POST /api/v2/refund" → "POST /refund"
           "GET /api/v1/products/{product_id}" → "GET /products/{product_id}"
+    Shared with the review engine (src/review/engine.py) so both pair endpoints
+    across versions identically.
     """
     import re
     return re.sub(r"/api/v\d+(\.\d+)?", "", ep_id)
+
+
+_normalise_endpoint_path = normalise_endpoint_path   # backwards-compatible private name
 
 
 def _find_v1_equivalent(ep_id: str, ep_ids_v1: set) -> Optional[str]:

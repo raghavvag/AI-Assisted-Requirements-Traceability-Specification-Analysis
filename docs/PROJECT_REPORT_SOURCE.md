@@ -20,8 +20,8 @@ AI system that reads both sides, converts each sentence into a numeric "meaning 
 transformer model, and measures how well every requirement is covered by the API. It produces a
 compliance matrix, detects when a new API version has drifted, explains each problem in human
 language using an LLM, and simulates a pull-request review bot that blocks non-compliant
-changes. It is delivered as both a research pipeline (Python + Streamlit) and a full product
-(FastAPI backend + React frontend + vector database + login).
+changes. It is delivered as a full product (FastAPI backend + React frontend + vector database +
+login) built on one shared research pipeline in `src/`.
 
 ---
 
@@ -150,10 +150,11 @@ It runs the same metrics for a **TF-IDF baseline** so the transformer's advantag
 
 ## 4. System architecture
 
-The project has **two parallel implementations** that share the same core Python modules in
-`src/`.
+The project has **one implementation**: a core pipeline in `src/` that the FastAPI backend
+calls. (A Streamlit dashboard built for the v1.0 prototype was retired in Project-II to remove
+duplicated code; everything it showed is in the React app.)
 
-### 4.1 Implementation A — research pipeline + Streamlit dashboard
+### 4.1 Core pipeline (`src/`)
 
 ```
 data files ──► src/parser.py ──► src/embedder.py ──► src/similarity.py ──► traceability matrix
@@ -162,15 +163,12 @@ data files ──► src/parser.py ──► src/embedder.py ──► src/simil
                                                    ├─► src/explainer.py ──────► LLM explanations
                                                    ├─► src/pr_reviewer.py ────► PR review comment
                                                    └─► src/evaluator.py ──────► Precision/Recall/F1/MAP
-                                                                                        │
-                                                                          app/streamlit_app.py (5 tabs)
 ```
 
-- **`app/streamlit_app.py`** — a 5-tab dashboard: Traceability Heatmap, Version Drift, PR
-  Reviewer, Evaluation Metrics, Vector DB Inspector. Has its own simple login (bcrypt) and
-  project persistence in SQLite.
+- SRS documents are read by `src/srs/` (Word, PDF, Markdown): requirement tables and tagged
+  headings are extracted, boilerplate is removed (`docs/srs-format-guide.md`).
 
-### 4.2 Implementation B — production web app
+### 4.2 Web application
 
 ```
 React frontend (Vite, port 5173)
@@ -210,11 +208,11 @@ body pending) for Jira, git-diff, Python-AST, and code-aware Siamese-BERT scorer
 
 ## 5. Module-by-module description (what is built)
 
-### 5.1 `src/` core (shared by both implementations)
+### 5.1 `src/` core pipeline
 
 | File | Lines | What it does |
 |---|---|---|
-| `parser.py` | 293 | Reads the SRS Markdown (splits on `REQ-N:` blocks, also accepts prefixed ids like `BNK-REQ-01`). Reads OpenAPI JSON/YAML (resolves `$ref` via `prance`, falls back to raw load), builds one rich text string per endpoint. |
+| `parser.py` | 293 | Entry point for the SRS (dispatches to `src/srs/` by file type: .docx, .pdf, .md, .txt). Reads OpenAPI JSON/YAML (resolves `$ref` via `prance`, falls back to raw load), builds one rich text string per endpoint. |
 | `embedder.py` | 137 | Wraps `sentence-transformers`. Loads `all-mpnet-base-v2` once, encodes text to L2-normalised 768-dim vectors. |
 | `similarity.py` | 252 | Cosine similarity matrix, traceability DataFrame builder, compliance bands, overall compliance score. |
 | `drift_detector.py` | 265 | Compares two API versions against the requirement baseline, computes per-pair deltas, severity, KPIs; dedupes renamed endpoints by normalised path. |
@@ -222,8 +220,8 @@ body pending) for Jira, git-diff, Python-AST, and code-aware Siamese-BERT scorer
 | `pr_reviewer.py` | 384 | `PRReviewer` class + 3 built-in PR scenarios. Tiered regression rule. Builds the GitHub-style Markdown comment. |
 | `evaluator.py` | 361 | Loads ground truth CSV; computes Precision/Recall/F1, MAP, per-requirement metrics, and a TF-IDF baseline matrix. |
 | `vector_store.py` | 426 | Qdrant client wrapper: create collection, upsert, filtered search, build matrix from search results, health stats. Handles the newer `query_points` API. |
-| `auth.py` | 306 | Streamlit-side login (bcrypt, session state, project ownership checks). |
-| `database.py` | 401 | Streamlit-side SQLite persistence (projects, documents, analysis state). |
+| `srs/` | — | Industrial SRS ingestion: docx/pdf/markdown readers -> block stream -> noise filter -> table / tagged / shall-statement strategies -> normaliser + extraction report. |
+| `config.py` | — | `.traceability.yml` loader (pydantic): SRS + OpenAPI paths, thresholds, fail_on, SRS extraction options. |
 
 ### 5.2 `src/alignment/` (the abstraction)
 
@@ -243,7 +241,7 @@ body pending) for Jira, git-diff, Python-AST, and code-aware Siamese-BERT scorer
 | `core/security.py` | JWT create/verify, `get_current_user` dependency. |
 | `database.py` | Async SQLAlchemy models: `User`, `Project`, `Document`, `AnalysisResult`. |
 | `routers/auth.py` | `POST /api/auth/google` (verify Google ID token, upsert user, issue JWT), `/api/auth/me`, `/api/auth/refresh`. Actionable error messages for common OAuth misconfig. |
-| `routers/projects.py` | Project CRUD, file upload (`.md/.txt/.json/.yaml/.yml`, one document per type: SRS / API_V1 / API_V2), document listing. |
+| `routers/projects.py` | Project CRUD, validated upload (SRS: `.docx/.pdf/.md/.txt`; specs: `.json/.yaml/.yml`; 10 MB, magic bytes, zip-bomb guard; one document per type), SRS extraction preview (`GET /srs/requirements`), document listing. |
 | `routers/analysis.py` | `POST /analyze`, `GET /matrix` (+ 3D graph payload), `GET /drift`, `POST /pr-review`, `GET /benchmark`, `GET /explain/{req_id}`. Falls back to the built-in demo dataset if a project has no uploads. |
 | `services/pipeline.py` | The orchestrator: parse → embed → Qdrant upsert → matrix → drift → 3D graph payload → IR metrics. Singleton embedder. |
 | `services/vector_store.py` | Backend copy of the Qdrant wrapper. |
@@ -314,8 +312,8 @@ finding relevant endpoints the keyword method misses (recall 1.00 vs 0.28).
 | Scenario | Verdict | Detail |
 |---|---|---|
 | `add_endpoint` (add optional `discount_code` to cart) | **PASS ✅** | Non-breaking; no requirement lost alignment |
-| `remove_idempotency` (drop client `transaction_id` from refund) | **BLOCK 🚫** | Violates REQ-04, delta ≈ −0.061 |
-| `drop_2fa_requirement` (remove 2FA gate from checkout) | **BLOCK 🚫** | Violates REQ-09, delta ≈ −0.123 |
+| `remove_idempotency` (drop client `transaction_id` from refund) | **BLOCK 🚫** | Violates REQ-04, delta ≈ −0.069 |
+| `drop_2fa_requirement` (remove 2FA gate from checkout) | **BLOCK 🚫** | Violates REQ-09, delta ≈ −0.172 |
 
 ### 7.5 Banking sample (threshold 0.55, verified by running the pipeline)
 
@@ -393,10 +391,9 @@ alignment-engine contract (bounds, determinism, ranks), and the strict-policy BL
 | LLM | OpenAI `gpt-4o-mini` (primary), Groq `llama-3.3-70b-versatile` (fallback) |
 | Vector DB | Qdrant (Docker, port 6338), multi-tenant by payload filter |
 | Backend | FastAPI, async SQLAlchemy 2.0, aiosqlite, pydantic v2, python-jose (JWT), google-auth |
-| Research UI | Streamlit + Plotly |
 | Product UI | React 18, Vite, Tailwind CSS v4, React Three Fiber (3D), GSAP + Lenis (scroll), Plotly, react-force-graph-3d |
-| Auth | Google OAuth 2.0 + JWT (product); bcrypt (Streamlit) |
-| Tests | pytest, pytest-asyncio (59 tests) |
+| Auth | Google OAuth 2.0 + JWT |
+| Tests | pytest, pytest-asyncio (165+ tests, incl. docx/pdf parity) |
 
 ---
 
@@ -439,9 +436,9 @@ This is the next build. Everything in sections 1–10 is already working.
 ## 12. How to run it (quick reference)
 
 ```bash
-# Research pipeline + Streamlit
+# Core pipeline + tests
 pip install -r requirements.txt
-streamlit run app/streamlit_app.py
+pytest -q -m "not slow"      # add the slow model tests with plain `pytest`
 
 # Product (3 terminals)
 docker compose up -d                                        # Qdrant on 6338

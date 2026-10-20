@@ -1,0 +1,76 @@
+# CI for this repository: lint + tests (Python) and a production build (frontend).
+# docs/plan.md §5.1
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python (ruff + pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            backend/requirements.txt
+
+      # all-mpnet-base-v2 is ~420 MB; download it once, not on every run.
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-all-mpnet-base-v2-${{ runner.os }}-v1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # CPU wheel: the default torch wheel pulls ~2 GB of CUDA libraries a runner cannot use.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt -r backend/requirements.txt ruff
+
+      - name: Ruff
+        run: ruff check .
+
+      # Pull requests skip the model-loading tests; main and develop run everything.
+      - name: Pytest (fast, pull request)
+        if: github.event_name == 'pull_request'
+        run: pytest -q -m "not slow"
+
+      - name: Pytest (full suite)
+        if: github.event_name != 'pull_request'
+        run: pytest -q
+
+  frontend:
+    name: Frontend (build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run build

@@ -3,66 +3,140 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'motion/react'
-import { Plus, Folder, ChevronRight, Upload, X, Trash2, CheckCircle } from 'lucide-react'
-import { projectsApi } from '../services/api'
+import { Plus, Folder, ChevronRight, Upload, X, Trash2, CheckCircle, AlertTriangle } from 'lucide-react'
+import { apiError, projectsApi } from '../services/api'
+import SrsPreview from '../components/SrsPreview'
 import { useDropzone } from 'react-dropzone'
 import toast from 'react-hot-toast'
 
 // ── Upload modal ────────────────────────────────────────────────────────────
-function UploadModal({ project, onClose, onDone }) {
-  const [files, setFiles] = useState({ SRS: null, API_V1: null, API_V2: null })
-  const [uploading, setUploading] = useState(false)
+const MAX_UPLOAD_MB = 10
 
-  function Dropzone({ docType, label }) {
-    const { getRootProps, getInputProps, isDragActive } = useDropzone({
-      accept: { 'text/*': ['.md', '.txt', '.json', '.yaml', '.yml'],
-                'application/json': ['.json'],
-                'application/x-yaml': ['.yaml', '.yml'] },
-      maxFiles: 1,
-      onDrop: (accepted) => {
-        if (accepted[0]) setFiles(f => ({ ...f, [docType]: accepted[0] }))
-      },
-    })
+// react-dropzone accepts a file when its MIME type OR its extension matches.
+// Windows often reports no MIME type for .md / .yaml, so extensions are listed
+// under every type.
+const ACCEPT = {
+  SRS: {
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+    'application/pdf': ['.pdf'],
+    'text/markdown': ['.md'],
+    'text/plain': ['.txt', '.md'],
+  },
+  API: {
+    'application/json': ['.json'],
+    'application/x-yaml': ['.yaml', '.yml'],
+    'text/yaml': ['.yaml', '.yml'],
+    'text/plain': ['.json', '.yaml', '.yml'],
+  },
+}
 
-    const file = files[docType]
-    return (
+const SLOTS = [
+  { docType: 'SRS',    label: 'Requirements SRS', hint: '.docx · .pdf · .md · .txt', accept: ACCEPT.SRS },
+  { docType: 'API_V1', label: 'OpenAPI spec v1',  hint: '.json · .yaml', accept: ACCEPT.API },
+  { docType: 'API_V2', label: 'OpenAPI spec v2',  hint: '.json · .yaml · enables drift analysis', accept: ACCEPT.API },
+]
+
+function Dropzone({ slot, file, status, onFile }) {
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    accept: slot.accept,
+    maxFiles: 1,
+    maxSize: MAX_UPLOAD_MB * 1024 * 1024,
+    onDrop: (accepted) => { if (accepted[0]) onFile(accepted[0]) },
+    onDropRejected: (rejections) => {
+      const err = rejections[0]?.errors?.[0]
+      const exts = slot.hint.split(' · ').filter((h) => h.startsWith('.')).join(', ')
+      toast.error(err?.code === 'file-too-large'
+        ? `${slot.label}: file is larger than ${MAX_UPLOAD_MB} MB`
+        : `${slot.label}: use ${exts}`)
+    },
+  })
+
+  const state = status?.state
+  const tone = state === 'error' ? 'bg-noncompliant/15 text-noncompliant'
+    : (file || state === 'done') ? 'bg-green-500/20 text-green-400' : 'bg-white/5 text-slate-500'
+  return (
+    <div>
       <div {...getRootProps()} className={`rounded-xl border-2 border-dashed p-4 cursor-pointer transition-colors
-          ${isDragActive ? 'border-brand-500 bg-brand-600/10' : 'border-white/10 hover:border-white/20'}`}>
+          ${isDragActive ? 'border-brand-500 bg-brand-600/10'
+            : state === 'error' ? 'border-noncompliant/40' : 'border-white/10 hover:border-white/20'}`}>
         <input {...getInputProps()} />
         <div className="flex items-center gap-3">
-          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0
-              ${file ? 'bg-green-500/20 text-green-400' : 'bg-white/5 text-slate-500'}`}>
-            {file ? <CheckCircle size={18} /> : <Upload size={18} />}
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${tone}`}>
+            {state === 'uploading' ? <span className="spinner" style={{ width: 16, height: 16 }} />
+              : state === 'error' ? <AlertTriangle size={18} />
+              : (file || state === 'done') ? <CheckCircle size={18} /> : <Upload size={18} />}
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-white">{label}</p>
+            <p className="text-sm font-medium text-white">
+              {slot.label} <span className="text-xs font-normal text-slate-500">({slot.hint})</span>
+            </p>
             <p className="text-xs text-slate-500 truncate">
               {file ? file.name : 'Drop file or click to browse'}
             </p>
           </div>
         </div>
       </div>
-    )
+      {status?.message && (
+        <p className={`text-[11px] mt-1.5 px-1 ${state === 'error' ? 'text-noncompliant' : 'text-compliant'}`}>
+          {status.message}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function UploadModal({ project, onClose, onDone }) {
+  const [files, setFiles] = useState({ SRS: null, API_V1: null, API_V2: null })
+  const [status, setStatus] = useState({})
+  const [uploading, setUploading] = useState(false)
+  const [srsPreview, setSrsPreview] = useState(null)
+  const [uploadedAny, setUploadedAny] = useState(false)
+
+  function setFile(docType, file) {
+    setFiles((f) => ({ ...f, [docType]: file }))
+    setStatus((s) => ({ ...s, [docType]: undefined }))
   }
 
   async function handleUpload() {
     setUploading(true)
-    let uploaded = 0
+    let ok = 0
+    let failed = 0
+    let srsDone = false
     for (const [docType, file] of Object.entries(files)) {
       if (!file) continue
+      setStatus((s) => ({ ...s, [docType]: { state: 'uploading' } }))
       try {
         const fd = new FormData()
         fd.append('doc_type', docType)
         fd.append('file', file)
-        await projectsApi.upload(project.id, fd)
-        uploaded++
-      } catch {
-        toast.error(`Failed to upload ${docType}`)
+        const res = await projectsApi.upload(project.id, fd)
+        const ex = res.data.extraction
+        const message = ex
+          ? `${ex.n_requirements} requirements extracted${ex.n_warnings ? ` · ${ex.n_warnings} warning(s)` : ''}`
+          : 'Uploaded'
+        setStatus((s) => ({ ...s, [docType]: { state: 'done', message } }))
+        setFiles((f) => ({ ...f, [docType]: null }))
+        if (docType === 'SRS') srsDone = true
+        ok++
+      } catch (err) {
+        failed++
+        setStatus((s) => ({ ...s, [docType]: { state: 'error', message: apiError(err, `Failed to upload ${docType}`) } }))
       }
     }
     setUploading(false)
-    if (uploaded > 0) { toast.success(`${uploaded} file(s) uploaded!`); onDone() }
+    if (ok) setUploadedAny(true)
+
+    if (srsDone && !failed) {
+      try {
+        const res = await projectsApi.srsRequirements(project.id)
+        setSrsPreview(res.data)
+      } catch { /* the preview is optional; the upload already succeeded */ }
+    }
+    if (failed) toast.error(`${failed} file(s) were rejected. See the messages below.`)
+    else if (ok && !srsDone) { toast.success(`${ok} file(s) uploaded`); onDone() }
   }
+
+  function close() { uploadedAny ? onDone() : onClose() }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
@@ -70,36 +144,64 @@ function UploadModal({ project, onClose, onDone }) {
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="glass-strong rounded-2xl p-6 w-full max-w-md shadow-2xl"
+        className={`glass-strong rounded-2xl p-6 w-full shadow-2xl max-h-[92vh] overflow-y-auto
+          ${srsPreview ? 'max-w-2xl' : 'max-w-md'}`}
       >
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h2 className="font-bold text-lg text-white">Upload Artifacts</h2>
+            <h2 className="font-bold text-lg text-white">
+              {srsPreview ? 'Review extracted requirements' : 'Upload Artifacts'}
+            </h2>
             <p className="text-xs text-slate-400">{project.name}</p>
           </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-white"><X size={18} /></button>
+          <button onClick={close} className="text-slate-500 hover:text-white"><X size={18} /></button>
         </div>
 
-        <div className="flex flex-col gap-3 mb-5">
-          <Dropzone docType="SRS"    label="Requirements SRS (.md / .txt)" />
-          <Dropzone docType="API_V1" label="OpenAPI Spec v1 (.json / .yaml)" />
-          <Dropzone docType="API_V2" label="OpenAPI Spec v2 (.json / .yaml)  ← drift analysis" />
-        </div>
+        {srsPreview ? (
+          <>
+            <SrsPreview data={srsPreview} />
+            <p className="text-[11px] text-slate-500 mt-3">
+              These requirements become the baseline for the analysis. If one is missing, fix the document
+              (tables need an ID column and a Description column; headings or paragraphs should start with an
+              ID such as FR-1 or REQ-04) and upload it again.
+            </p>
+            <div className="flex gap-3 mt-4">
+              <button className="btn-secondary flex-1" onClick={() => setSrsPreview(null)}>Upload more files</button>
+              <button className="btn-primary flex-1" onClick={onDone}>Looks good</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-col gap-3 mb-5">
+              {SLOTS.map((slot) => (
+                <Dropzone
+                  key={slot.docType}
+                  slot={slot}
+                  file={files[slot.docType]}
+                  status={status[slot.docType]}
+                  onFile={(f) => setFile(slot.docType, f)}
+                />
+              ))}
+            </div>
 
-        <div className="flex gap-3">
-          <button className="btn-secondary flex-1" onClick={onClose}>Cancel</button>
-          <button
-            className="btn-primary flex-1"
-            onClick={handleUpload}
-            disabled={uploading || Object.values(files).every(f => !f)}
-          >
-            {uploading ? <span className="spinner" /> : <Upload size={16} />}
-            {uploading ? 'Uploading…' : 'Upload Files'}
-          </button>
-        </div>
-        <p className="text-[10px] text-slate-600 text-center mt-3">
-          If no files are uploaded, the built-in E-Commerce demo dataset will be used.
-        </p>
+            <div className="flex gap-3">
+              <button className="btn-secondary flex-1" onClick={close}>{uploadedAny ? 'Close' : 'Cancel'}</button>
+              <button
+                className="btn-primary flex-1"
+                onClick={handleUpload}
+                disabled={uploading || Object.values(files).every(f => !f)}
+              >
+                {uploading ? <span className="spinner" /> : <Upload size={16} />}
+                {uploading ? 'Uploading…' : 'Upload Files'}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-600 text-center mt-3">
+              Formal SRS documents (IEEE 830 / ISO 29148, Word or PDF) are supported: requirement tables and
+              tagged headings are extracted and boilerplate is removed. Max {MAX_UPLOAD_MB} MB per file.
+              Without uploads, the built-in E-Commerce demo dataset is used.
+            </p>
+          </>
+        )}
       </motion.div>
     </div>
   )

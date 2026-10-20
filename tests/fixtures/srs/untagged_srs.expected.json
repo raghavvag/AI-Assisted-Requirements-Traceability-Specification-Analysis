@@ -1,0 +1,30 @@
+{
+  "fixture": "untagged_srs.docx",
+  "requirements": [
+    {
+      "id": "SRS-AUTO-001",
+      "title": "The system shall allow customers to place an order from the cart",
+      "text": "The system shall allow customers to place an order from the cart.",
+      "type": "functional",
+      "priority": null
+    },
+    {
+      "id": "SRS-AUTO-002",
+      "title": "The order confirmation must include an order number",
+      "text": "The order confirmation must include an order number.",
+      "type": "functional",
+      "priority": null
+    },
+    {
+      "id": "SRS-AUTO-003",
+      "title": "The system shall accept card payments",
+      "text": "The system shall accept card payments.",
+      "type": "functional",
+      "priority": null
+    }
+  ],
+  "must_not_contain": [
+    "stakeholders",
+    "browse products"
+  ]
+}

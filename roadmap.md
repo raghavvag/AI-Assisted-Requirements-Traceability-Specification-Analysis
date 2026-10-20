@@ -4,6 +4,11 @@
 > **Version:** 1.0  
 > **Last Updated:** 2026-08-30  
 > **Reference Document:** `knowledge.md`  
+> **Update 2026-10-16 (Project-II, M2):** the Streamlit dashboard (`app/streamlit_app.py`, with
+> `src/auth.py` / `src/database.py`) has been **retired**. The product UI is the React + FastAPI
+> app (`frontend/` + `backend/`), which uses the same `src/` pipeline. Streamlit mentions below are
+> kept as the record of the v1.0 prototype. Current plan: `docs/plan.md`; checklist: `docs/leftover.txt`.
+>
 > **Anti-Hallucination Constraint:** All steps are strictly scoped to NLP-to-API traceability, drift detection, and PR review simulation. No features outside this scope are described.
 
 ---
@@ -20,7 +25,7 @@
 
 **Hard Constraints:**
 - All backend code: **Python 3.10+**
-- UI framework: **Streamlit** (no React, no HTML/CSS)
+- UI framework: **Streamlit** (v1.0 prototype; replaced by React + FastAPI, Streamlit retired 2026-10-16)
 - Embeddings: **`sentence-transformers`** (local, no API cost for core pipeline)
 - Similarity: **Scikit-learn cosine_similarity** (primary) + **FAISS** (optional, for scale)
 - LLM for explainability: **OpenAI GPT-4o-mini** (primary) with **Groq Llama-3.3-70B** as optional fallback
@@ -77,10 +82,6 @@ PyYAML>=6.0
 # LLM Integration
 openai>=1.0.0
 groq>=0.9.0
-
-# UI & Visualisation
-streamlit>=1.35.0
-plotly>=5.18.0
 
 # Utilities
 python-dotenv>=1.0.0
@@ -648,6 +649,8 @@ Logic:
 
 **Duration:** ~5–6 hours  
 **Status:** ✅ All deliverables built on 2026-08-30  
+> Superseded: this dashboard was retired on 2026-10-16; the React web app (`frontend/`) replaces it.
+
 **Goal:** Build the Streamlit dashboard that integrates all backend modules into a polished, interactive presentation layer with three functional tabs.
 
 ---
@@ -965,7 +968,7 @@ TF-IDF (baseline)   | 0.61      | 0.57   | 0.59     | 0.55
 | LLM explanations generated for all 2 violations | Yes | TBD |
 | All Streamlit tabs render without errors | Yes | TBD |
 
-**Run command:** `streamlit run app/streamlit_app.py`
+**Run command (current):** start `backend/` + `frontend/` as in `startup_guide.md`; tests: `pytest`
 
 ---
 

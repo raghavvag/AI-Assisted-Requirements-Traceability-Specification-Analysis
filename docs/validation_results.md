@@ -19,7 +19,7 @@
 | REQ-01 top match = auth endpoint | yes | `POST /api/v1/auth/login` | ✅ |
 | Drift: REQ-09 (2FA removed) detected | yes | delta −0.111, Minor Drift | ✅ |
 | Drift: REQ-04 (idempotency removed) detected by matrix drift detector | yes | **partial** — see §4 | ⚠️ |
-| Drift: REQ-04 detected by PR Reviewer (tiered rule) | yes | delta −0.061, flagged | ✅ |
+| Drift: REQ-04 detected by PR Reviewer (tiered rule) | yes | delta −0.069, flagged | ✅ |
 | False positives on non-breaking PR (`add_endpoint`) | 0 | 0 | ✅ |
 | Transformer F1 > TF-IDF F1 | yes | 0.71 vs 0.34 | ✅ |
 | Latency, matrix gen (< 50 endpoints, CPU) | < 5 s | ~1.5 s (model warm) | ✅ |
@@ -75,7 +75,7 @@ The REQ-04 violation (refund drops the client-provided `transaction_id`) is a
 **real but small** semantic signal:
 
 ```
-REQ-04  ↔  refund endpoint     v1 = 0.810     v2 = 0.749     Δ = −0.061
+REQ-04  ↔  refund endpoint     v1 = 0.819     v2 = 0.750     Δ = −0.069   (PR scenario #42)
 ```
 
 The v2 refund endpoint still describes refunds, orders, amounts and reasons, so
@@ -85,7 +85,8 @@ compliance stays at 100 %.
 
 **Mitigations in place**
 
-1. **PR Reviewer uses a tiered relative-drop rule** (`src/pr_reviewer.py`): for a
+1. **The review engine uses a tiered relative-drop rule** (`src/review/engine.py`
+   `is_regression`, thresholds in `.traceability.yml`): for a
    strongly-linked pair (score_v1 ≥ 0.60) a drop of ≥ 0.05 is a violation. Under
    this rule the `remove_idempotency` PR scenario **is** blocked on REQ-04.
 2. **Roadmap Phase D** (`docs/architecture/semantic-alignment-roadmap.md`):

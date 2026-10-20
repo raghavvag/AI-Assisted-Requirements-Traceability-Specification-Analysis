@@ -7,30 +7,26 @@ Validates all success criteria from the roadmap.
 Run with: pytest tests/test_pipeline.py -v
 """
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-# Ensure src package is importable
+# src is importable via tests/conftest.py
 ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT))
 
-from src.parser import extract_requirements, extract_endpoints, load_openapi_spec
+from src.parser import extract_requirements, extract_endpoints
 from src.embedder import SemanticEmbedder
 from src.similarity import (
     compute_similarity_matrix,
     build_traceability_matrix,
     compute_overall_compliance_score,
     get_compliance_category,
-    get_compliance_summary,
 )
 from src.drift_detector import (
     compute_drift_report,
     classify_severity,
-    get_drifted_pairs,
     get_compliance_kpis,
 )
 from src.evaluator import (
@@ -361,7 +357,7 @@ class TestDriftDetector:
         """Critical: REQ-09 / checkout 2FA removal must show drift in v2."""
         req09_drifted = drift_report[
             (drift_report["requirement_id"] == "REQ-09") &
-            (drift_report["drifted"] == True)
+            (drift_report["drifted"] == True)  # noqa: E712 (pandas mask)
         ]
         assert len(req09_drifted) > 0, \
             "REQ-09 drift not detected — v2 checkout should violate 2FA requirement"
@@ -449,11 +445,11 @@ class TestEvaluator:
 
         # Use the same threshold for fair comparison
         shared_threshold = 0.40
-        t_metrics = compute_precision_recall_f1(
+        compute_precision_recall_f1(
             matrix_df_v1, gt, requirements, endpoints_v1, threshold=shared_threshold
         )
         tfidf_mat = compute_tfidf_similarity_matrix(requirements, endpoints_v1)
-        b_metrics = compute_precision_recall_f1(
+        compute_precision_recall_f1(
             tfidf_mat, gt, requirements, endpoints_v1, threshold=shared_threshold
         )
 

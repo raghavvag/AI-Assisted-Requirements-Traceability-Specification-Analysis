@@ -16,7 +16,7 @@ Design decisions:
 
 import logging
 import os
-from typing import List, Optional, Union
+from typing import List
 
 import numpy as np
 from dotenv import load_dotenv

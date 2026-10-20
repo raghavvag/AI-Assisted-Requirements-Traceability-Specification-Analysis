@@ -4,6 +4,11 @@
 > **Version:** 1.0  
 > **Last Updated:** 2026-08-30  
 > **Status:** Approved for Execution  
+>
+> **Update 2026-10-16 (Project-II, M2):** the Streamlit dashboard (`app/streamlit_app.py`, with
+> `src/auth.py` / `src/database.py`) has been **retired**. The product UI is the React + FastAPI
+> app (`frontend/` + `backend/`), which uses the same `src/` pipeline. Streamlit mentions below are
+> kept as the record of the v1.0 prototype. Current plan: `docs/plan.md`; checklist: `docs/leftover.txt`.
 
 ---
 
@@ -109,7 +114,7 @@ The proposed framework is an **end-to-end automated compliance verification syst
                              |
 +----------------------------v-------------------------------------+
 |                  PRESENTATION LAYER                              |
-|  Streamlit Dashboard (Heatmaps, KPI Cards, PR Review View)       |
+|  React + FastAPI web app (Heatmaps, 3D graph, KPI cards, PR Bot) |
 +------------------------------------------------------------------+
 ```
 
@@ -203,7 +208,7 @@ The PR Review Simulator models the behaviour of a GitHub Actions bot. When a dev
 - Re-run the compliance engine on modified endpoints only (partial re-embedding for performance).
 - For each regression (score drop below threshold), invoke the LLM explainability engine with a structured prompt.
 - Output a formatted PR review comment (Markdown) that can be posted by a GitHub Actions workflow via the GitHub REST API.
-- Simulate the full flow in the Streamlit UI's "PR Reviewer" tab.
+- Simulate the full flow in the web app's "PR Bot" page.
 
 **Success Criterion:** The PR simulator correctly generates actionable, non-hallucinated explanations for all injected drift scenarios, verified by manual review against ground-truth change descriptions.
 
@@ -281,7 +286,7 @@ A fully operational software prototype with the following verified capabilities:
 | Generate N×M Traceability Matrix with cosine similarity scores | Output validation against ground truth |
 | Detect specification drift across 2 API versions | Correct identification of all injected breaking changes |
 | Generate LLM-powered PR review comments for drift violations | Manual review for factual accuracy and actionability |
-| Display interactive Plotly heatmap and drift timeline in Streamlit | UI functional test |
+| Display interactive Plotly heatmap and drift timeline in the web UI | UI functional test |
 | Report Precision, Recall, F1, and MAP metrics | Automated metric computation script |
 
 ### 6.2 Research & IP Outcomes
@@ -327,8 +332,8 @@ project/
 │   ├── explainer.py                  # LLM prompt builder & response parser
 │   ├── pr_reviewer.py                # PR diff simulator & review generator
 │   └── evaluator.py                  # Precision, Recall, F1, MAP calculator
-├── app/
-│   └── streamlit_app.py              # Multi-tab Streamlit dashboard
+├── backend/                          # FastAPI API (auth, projects, analysis)
+├── frontend/                         # React 18 + Vite web app
 ├── tests/
 │   └── test_pipeline.py              # Unit + integration tests
 ├── requirements.txt
@@ -367,7 +372,7 @@ project/
                                 [pr_reviewer.py: format]
                                            |
                                            v
-                                [streamlit_app.py: display]
+                                [React web app: display]
 ```
 
 ---
@@ -376,13 +381,13 @@ project/
 
 ### In Scope
 
-- Natural language SRS ingestion (Markdown, plain text)
+- Natural language SRS ingestion (Word .docx, PDF, Markdown, plain text; see docs/srs-format-guide.md)
 - OpenAPI 3.0 / Swagger 2.0 JSON and YAML parsing
 - Transformer-based semantic embedding (local `sentence-transformers` or API-based)
 - Cosine similarity-based traceability matrix generation
 - Multi-version API drift detection (2-version comparison)
 - LLM-powered explainability for flagged violations
-- Streamlit-based interactive dashboard
+- Interactive web dashboard (React + FastAPI)
 - Simulated PR review comment generation
 - IR evaluation metrics (Precision, Recall, F1, MAP)
 
@@ -436,8 +441,8 @@ project/
 | `faiss-cpu` | >= 1.7.0 | Approximate nearest neighbour similarity search |
 | `scikit-learn` | >= 1.3.0 | Cosine similarity computation, TF-IDF baseline |
 | `prance` / `openapi-spec-validator` | Latest | OpenAPI JSON/YAML parsing and validation |
-| `streamlit` | >= 1.30.0 | Interactive dashboard UI |
-| `plotly` | >= 5.18.0 | Traceability heatmap and drift timeline visualisation |
+| React 18 + `plotly.js` | Latest | Web dashboard, heatmap and drift timeline (frontend/) |
+| `fastapi` | >= 0.111 | API backend (backend/) |
 | `openai` / `groq` | Latest | LLM prompt orchestration and API access |
 | `numpy` / `pandas` | Latest | Numerical computation and matrix management |
 | `pytest` | >= 7.0 | Automated testing framework |

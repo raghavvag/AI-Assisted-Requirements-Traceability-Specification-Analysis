@@ -1,0 +1,426 @@
+# MASTER CHECKLIST: Production Readiness
+Project: AI-Assisted Requirements Traceability and Software Specification Analysis
+Updated: 2026-10-16 (M1 implemented)
+Design reference: docs/plan.md (each task gives the section it comes from, e.g. [§2.4])
+
+How to use this file
+- Do the tasks IN ORDER. Each task is sized to fit one coding session or one PR.
+- Mark progress like this: [ ] = todo, [~] = in progress, [x] = done (put the date after it).
+- A task is finished only when its "Done when" check is true AND `pytest` is green.
+
+Decisions already made
+- SRS formats: .docx + .pdf + .md/.txt
+- Webhook demo: a local backend with a smee.io tunnel
+- The Streamlit v1 app will be retired
+- PR intent comes from the linked GitHub issue body (Closes #N), split into acceptance criteria
+- Code-aware model: jinaai/jina-embeddings-v2-base-code, behind AlignmentScorer
+- The LLM only explains results. It never sets a score or a verdict.
+
+======================================================================
+M0  HOUSEKEEPING  (~0.5 day)
+======================================================================
+[ ] T0.1  Commit the pending frontend work so M1 starts from a clean tree. This covers 5 modified pages
+          and the new components ComplianceHeatmap.jsx, CoverageList.jsx and ui.jsx. Decide whether
+          docs/PITCH.* artefacts are committed or gitignored.
+          Done when: `git status` is clean.
+[x] T0.2  Add pytest.ini (testpaths=tests, a `slow` marker for tests that load the model). Add
+          tests/conftest.py with a session-scoped SemanticEmbedder fixture and the sys.path setup.
+          Remove the per-file sys.path.insert lines.                              [§3.5]
+          Done when: `pytest -q` shows 59 passed and `pytest -m "not slow"` runs.
+          (2026-10-16: pytest.ini + tests/conftest.py with a session `semantic_embedder` fixture.)
+[x] T0.3  Record the baseline metrics (F1 0.71 / TF-IDF 0.34 / Recall 1.00 / MAP) in a snapshot
+          file tests/fixtures/baseline_metrics.json. The parity tests in M1 compare against it.
+          (2026-10-16: scripts/snapshot_baseline_metrics.py -> F1 0.7098, P 0.6202, R 1.00, MAP 1.00;
+          TF-IDF F1 0.34, R 0.275.)
+
+======================================================================
+M1  INDUSTRIAL SRS INGESTION: .docx / .pdf / .md  (~5-6 days)   [§2]
+     This milestone answers the Project-I reviewers' main criticism.
+======================================================================
+-- Foundation --
+[x] T1.1  Add the dependencies python-docx>=1.2 and pdfplumber>=0.11 to the root requirements.txt
+          and to backend/requirements.txt.
+          Done when: both import in the venv.
+[x] T1.2  Create the package skeleton src/srs/ (__init__, blocks, options, noise, strategies,
+          normalise, report, readers/).                                         [§2.3]
+          The block IR dataclasses are Heading(level,text), Paragraph(text,style,is_list) and
+          Table(rows), each with a Locator. Also add ExtractionOptions and an ExtractionReport
+          dataclass.
+          Done when: the modules import and the dataclasses have unit tests.
+
+-- DOCX reader --
+[x] T1.3  readers/docx_reader.py: walk the body in document order with
+          Document.iter_inner_content() and emit Heading, Paragraph and Table blocks. Heading level
+          comes from the Heading N/Title style, then w:outlineLvl, then a numbered-heading regex.
+                                                                                [§2.4]
+[x] T1.4  DOCX edge cases:
+          - unwrap w:sdt content controls;
+          - keep w:ins (tracked insertion) text and drop w:del;
+          - dedupe merged cells by cell._tc;
+          - join multi-paragraph cells;
+          - skip repeated header rows (w:tblHeader);
+          - turn a 1x1 table into a Paragraph;
+          - recurse into nested tables.
+          Images, headers, footers, comments and footnotes are never read.
+          Done when: every case has a small unit test built in memory with python-docx.
+
+-- Cleaning + strategies --
+[x] T1.5  noise.py:
+          - section blocklist by heading (TOC, revision/document history, conventions, audience,
+            definitions/acronyms/glossary, references, appendix, index, approvals/sign-off), which
+            users can extend;
+          - TOC-style and dot-leader lines;
+          - captions (Figure|Fig.|Table|Diagram N);
+          - page-number, empty and glyph-only lines;
+          - text cleanup: NFKC, smart quotes and dashes to ASCII, remove NBSP and zero-width
+            characters, strip bullet glyphs, collapse whitespace.
+          Every skipped block is counted by reason in the report.               [§2.5]
+[x] T1.6  strategies.TableStrategy: detect requirement tables from the header row (an ID column plus
+          a description/requirement/statement/text column). Map the optional title, priority, type,
+          acceptance-criteria and rationale columns into metadata. Report skipped rows.   [§2.6]
+[x] T1.7  strategies.TaggedStrategy: use the default tag regex
+          (?:[A-Z][A-Z0-9]{0,9}[-_.])?(?:REQ|FR|NFR|SRS|SR|UR|BR|SYS|FUNC|US)[-_. ]?\d{1,4}(?:\.\d{1,3})*
+          with optional brackets and a separator (: - . ) or tab). Match the tag only at the START
+          of a block. The body runs until the next tag or a heading of the same or higher level.
+          Inline cross-references ("see REQ-02") must never split a requirement.          [§2.6]
+[x] T1.8  strategies.ShallStatementStrategy: a fallback that only runs when tables and tags find
+          nothing. It turns shall/must sentences inside requirement-like sections into requirements
+          with IDs SRS-AUTO-001... and id_source="generated".                   [§2.6]
+[x] T1.9  normalise.py:
+          - canonical ID (FR 3 -> FR-3), keeping raw_id;
+          - title rules;
+          - text = "title. description [Acceptance criteria: ...]";
+          - pull inline "Priority:"/"Rationale:" out into metadata (rationale is not embedded);
+          - type = functional | non_functional (from an NFR prefix or the section heading);
+          - drop duplicate IDs with a warning;
+          - warn when text is over ~350 words or under 5 words;
+          - support the include_nfr option.
+          Merge the strategies in priority order: table, then tagged, then shall.   [§2.7]
+
+-- Wiring --
+[x] T1.10 src/srs/__init__.py: add extract_requirements_with_report(path, options), which returns
+          (requirements, report). Change src/parser.py extract_requirements(path) to dispatch on the
+          file extension:
+          - .docx goes to the block pipeline;
+          - .pdf goes to the block pipeline;
+          - .md/.txt try the LEGACY regex first and fall back to blocks only if it finds nothing.
+          The signature and the {id,title,text} output stay the same. Reject .doc/.docm with a clear
+          message.
+          Done when: the existing 48 pipeline tests pass unchanged.            [§2.4, §2.7]
+[x] T1.11 readers/pdf_reader.py (pdfplumber):
+          - tables with find_tables(), and text taken outside the table bounding boxes;
+          - headings from font size/bold versus the median body size;
+          - strip running headers/footers (top/bottom 8%, repeated on 50% or more of pages) and
+            page numbers;
+          - remove hyphenation and join wrapped lines;
+          - scanned PDFs (no text layer) raise "no text layer - OCR not supported".     [§2.4]
+[x] T1.12 readers/markdown_reader.py fallback: turn # headings, pipe tables and paragraphs into
+          blocks, so a .md SRS without the REQ-N: format still works.
+
+-- Fixtures + tests --
+[x] T1.13 scripts/build_srs_fixtures.py writes tests/fixtures/srs/ deterministically:
+          - ecommerce_srs_ieee.docx: IEEE-830 layout with a cover page, revision table, TOC,
+            boilerplate, PNG + caption, REQ-01..06 in a table, REQ-07..10 as tagged Heading 3, and
+            an appendix. The text must be IDENTICAL to data/requirements/ecommerce_srs.md;
+          - messy_srs.docx: FR1/FR-2/FR 3/[REQ-4]/FR-5.1, merged and multi-paragraph cells, a
+            repeated header, a 1x1 callout, an sdt, a tracked insertion and deletion, an inline
+            cross-reference, a duplicate ID, and an NFR section;
+          - banking_srs.docx: BNK-REQ-01..08 in tables;
+          - untagged_srs.docx: only "The system shall..." sentences.            [§2.10]
+[x] T1.14 Export ecommerce_srs_ieee.pdf once (Word "Save as PDF") and commit it. Add a small
+          image-only scanned.pdf as well.
+[x] T1.15 Write the golden *.expected.json for each fixture and tests/test_srs_extraction.py:
+          - golden match (ids, titles, texts);
+          - noise assertions: no "Table of Contents", "Revision", "Figure", "Page N" or glossary
+            text in any requirement;
+          - duplicate warning, NFR typing, shall fallback, scanned-PDF error;
+          - each DOCX edge case from T1.4.
+[x] T1.16 PARITY TEST (the key evidence for the reviewers): requirements extracted from .docx and
+          from .pdf must equal the .md requirements. The full pipeline on store_v1 must reproduce
+          F1 0.71 +/- 0.005 and the same MAP as the T0.3 snapshot. Mark the test `slow`.
+
+-- Backend --
+[x] T1.17 backend/app/routers/projects.py upload_document:                     [§2.8]
+          - per-doc-type allow-list (SRS: .docx .pdf .md .txt; API_V1/V2: .json .yaml .yml);
+          - MAX_UPLOAD_MB=10 as a setting, returning 413;
+          - magic bytes (PK\x03\x04 for .docx, %PDF for .pdf), returning 400;
+          - reject .docm;
+          - zip-bomb guard (sum of uncompressed sizes up to 50 MB);
+          - delete the stale SRS.<old-ext> file.
+[x] T1.18 Parse the SRS at upload time inside run_in_threadpool:
+          - 0 requirements: return 422 with the ExtractionReport;
+          - success: store the requirements JSON + report in Document.raw_text (an existing column
+            that nothing reads, so no migration is needed) and return the extraction summary in the
+            response.
+          In analysis.py, turn parser ValueError into 422 instead of 500.
+[x] T1.19 Add GET /api/projects/{id}/srs/requirements, which returns {requirements, report}. Add a
+          Pydantic schema to backend/app/schemas.py.
+[x] T1.20 Write backend tests (httpx.AsyncClient with a dependency-override user) in
+          tests/test_upload_api.py: 413, 400 (extension and magic bytes), 422 (an SRS with no
+          requirements), 201 for the docx happy path with a count, and stale-file cleanup.
+
+-- Frontend --
+[x] T1.21 frontend/src/pages/DashboardPage.jsx UploadModal:
+          - per-dropzone accept: SRS gets .docx/.pdf/.md/.txt with the correct MIME types, specs
+            get .json/.yaml/.yml;
+          - SRS label "Requirements SRS (.docx / .pdf / .md / .txt)";
+          - show err.response.data.detail in the toast.
+          Add srsRequirements(id) to services/api.js.                          [§2.9]
+[x] T1.22 New frontend/src/components/SrsPreview.jsx, built from components/ui.jsx:
+          - "Extracted N requirements · x from tables · y from tagged headings";
+          - warnings list;
+          - collapsible table (ID / title / type / priority / source locator).
+          Show it after an SRS upload and on the project page before "Run analysis".
+[x] T1.23 Optional: show type/priority badges on requirement nodes in TraceabilityPage.
+
+-- Close-out --
+[ ] T1.24 Manual QA: run 2 or more public real-world IEEE-830 SRS .docx files through
+          `extract-srs` (or the UI). Expect no noise and at least 95% of the tagged requirements
+          found. Note the results for §7.
+[x] T1.25 Docs: update docs/frontend-testing-guide.md (docx upload test cases), startup_guide.md
+          and the data/samples README. Add a short "Writing an SRS the tool understands" section to
+          docs/plan.md or a new docs/srs-format-guide.md.
+          Milestone done when: upload .docx in the UI, preview it, analyse it, and get the same
+          matrix as the .md dataset.
+          STATUS 2026-10-16: M1 code complete. 165 tests pass (incl. slow .docx F1 parity).
+          Live check through the Vite proxy (real uvicorn + vite, throwaway DB): .docx/.pdf upload ->
+          preview -> analyze -> matrix / drift / benchmark / 3 PR scenarios / explain all correct;
+          422/400 error shapes render via apiError(). Open: T1.24 (real-world SRS files) and a
+          visual click-through with a Google login (not possible from the agent session).
+
+======================================================================
+M2  CONSOLIDATION + SHARED REVIEW ENGINE + CLI  (~2-3 days)   [§3]
+======================================================================
+[x] T2.1  Retire Streamlit. First grep to confirm there are no other importers, then delete
+          app/streamlit_app.py, src/auth.py, src/database.py and data/_uploads/. Remove streamlit
+          and v1-only dependencies from the root requirements.txt.               [§3.1]
+[x] T2.2  Update the Streamlit references in startup_guide.md, knowledge.md, roadmap.md,
+          docs/PROJECT_REPORT_SOURCE.md and README.
+[x] T2.3  src/parser.py: split out extract_endpoints_from_spec(spec: dict, source="").
+          extract_endpoints(path) wraps it.                                      [§3.2]
+[x] T2.4  src/config.py: a .traceability.yml loader (pydantic) for the srs and openapi paths,
+          thresholds (compliant, partial, drift, regression_strong, regression_weak), fail_on and
+          srs_extraction options. This becomes the single source of thresholds; env vars only
+          override it.                                                           [§3.3]
+          (2026-10-16: T2.1-T2.4 done. data/_uploads/ did not exist. Removed from requirements.txt:
+          streamlit, streamlit-authenticator, bcrypt, plotly, sqlalchemy, alembic; added pydantic.
+          Local $ref resolution added to extract_endpoints_from_spec. Repo .traceability.yml added
+          (pulls T4.3 forward). 217 tests pass.)
+[x] T2.5  src/review/engine.py review_spec_change(requirements, spec_base, spec_head, intent=None,
+          policy, embedder, explainer) -> ReviewResult. It:
+          - diffs endpoints by normalised path into added/removed/modified;
+          - applies the tiered regression rule, moved out of PRReviewer._is_regression;
+          - runs the optional intent check through EmbeddingAlignmentScorer +
+            ThresholdAlignmentGate;
+          - sets severity with drift_detector.classify_severity (delete the duplicate in
+            pr_reviewer);
+          - returns a PASS/WARN/BLOCK verdict plus Markdown.                     [§3.2]
+[x] T2.6  Refactor PRReviewer.run_pr_review: turn each simulated scenario into base and head
+          mini-specs and call the engine.
+          Done when: add_endpoint=PASS, remove_idempotency=BLOCK (REQ-04) and
+          drop_2fa_requirement=BLOCK (REQ-09) in both the API and the PRBotPage.
+          (2026-10-16: src/review/{engine,report}.py; PRReviewer scenarios are now real OpenAPI
+          mini-specs fed to review_spec_change. Margins on mpnet: REQ-04 0.819 / -0.069 (strong tier
+          -0.05), REQ-09 0.565 / -0.172, add_endpoint worst -0.052; closest miss REQ-01 at 0.340 vs
+          floor 0.35. Built from the REAL store_v2 checkout, scenario 3 would PASS (REQ-09 -0.060 at
+          0.453): the matrix drift page catches REQ-09 via the removed 2FA endpoints instead.
+          /pr-review now also returns verdict + changes. 264 tests pass.)
+[x] T2.7  src/cli.py (python -m src.cli):
+          - commands: extract-srs, analyze, review (--srs --base-spec --head-spec --issue-body
+            --config --format md|json --fail-on block|critical|never);
+          - exit codes 0 pass/warn, 1 block, 2 error;
+          - must work with no Qdrant and no LLM keys.                            [§3.4]
+[x] T2.8  Tests:
+          - tests/test_review_engine.py: the 3 scenarios, a tiered-rule table, and the intent gate; [done]
+          - tests/test_cli.py: exit codes, JSON schema, and the store_v1 -> store_v2 review exiting
+            with 1.
+          Add the first unit tests for pr_reviewer.
+
+          (2026-10-16: src/cli.py + src/review/intent.py; tests/test_cli.py (43) and tests/fakes.py.
+          Engine change found by the store_v1 -> v2 integration run: without scoping the weak tier
+          also flagged REQ-05/06/07 vs the 2FA endpoints (not relevant in the ground truth). Added
+          trace-link scoping, thresholds.link_top_k = 3: only pairs where the endpoint is among the
+          requirement's top-3 base matches can regress. Result: BLOCK on REQ-02, REQ-04, REQ-09
+          (REQ-02 = v2 GET /products/{id} lost its parameter + response detail; GT-relevant).
+          M2 COMPLETE. 310 tests pass. Manual follow-ups: manual.md.)
+
+======================================================================
+M3  LIVE GITHUB APP: PR REVIEW BOT  (~5-6 days)   [§4]
+======================================================================
+[ ] T3.1  Register the GitHub App "Traceability Bot":
+          - permissions Checks RW, Pull requests RW, Issues R, Contents R, Metadata R;
+          - events Pull request and Check run;
+          - webhook URL = a smee.io channel; generate a webhook secret.
+          Store the .pem OUTSIDE the repo and add *.pem to .gitignore. Install the app on the demo
+          repo.                                                                  [§4.6]
+[x] T3.2  backend/app/core/config.py: add GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY_PATH,
+          GITHUB_WEBHOOK_SECRET, GITHUB_APP_SLUG and GITHUB_CHECK_NAME. Add them to both
+          .env.example files and to the /api/health config block (as loaded true/false only).
+[x] T3.3  backend/app/services/github/auth.py:
+          - app JWT (RS256 via python-jose, iat-60s, exp 9 min);
+          - installation token exchange, cached until 5 minutes before expiry.
+          services/github/client.py: an httpx.AsyncClient wrapper for check runs (create/update),
+          PR files (paginated), contents at a ref (base64 decode), issues, issue comments
+          (list/create/patch), the GraphQL closingIssuesReferences query, and rate-limit retry.
+                                                                                 [§4.2]
+[x] T3.4  backend/app/routers/github.py POST /api/github/webhook:
+          - verify the raw-body HMAC X-Hub-Signature-256 with hmac.compare_digest (401 on
+            mismatch);
+          - dedupe on X-GitHub-Delivery;
+          - route ping, installation*, pull_request (opened/synchronize/reopened/edited) and
+            check_run.rerequested;
+          - return 202 and run the review in BackgroundTasks.
+          Register the router in main.py.                                        [§4.3]
+          (2026-10-16: T3.2-T3.4 done. config.py GITHUB_* settings (+ inline GITHUB_APP_PRIVATE_KEY,
+          GITHUB_API_URL for Enterprise, settings.github_app_configured, /api/health flags);
+          services/github/{auth,client,errors}.py; routers/github.py with HMAC, per-process TTL
+          delivery cache (failed jobs forget their id so a redelivery retries), ReviewJob +
+          set_review_handler() hook for T3.5. tests/test_github_app.py (67). Test isolation moved to
+          tests/conftest.py (temp DB + upload dir for every test). 377 tests pass.)
+[x] T3.5  backend/app/services/github/review_flow.py, steps 1-9 of §4.4:
+          - create the check run (in_progress);
+          - load .traceability.yml at head; if missing, complete as neutral;
+          - get the PR files; if no spec/SRS change, complete as neutral;
+          - get the base and head specs; get the SRS at head (a .docx goes to a temp file and then
+            src/srs);
+          - get the linked issue (regex + GraphQL) and split it into acceptance criteria;
+          - run review_spec_change;
+          - complete the check run (success/neutral/failure, summary table, explanations);
+          - upsert the PR comment (<!-- traceability-bot --> marker).
+[x] T3.6  Issue parsing helpers: the closing-keyword regex, and an acceptance-criteria splitter
+          (checkboxes, then bullets under an "Acceptance Criteria" heading, then the whole body).
+          Unit-tested.
+[x] T3.7  Persistence: add a PRReviewRun model to backend/app/database.py (installation_id, repo,
+          pr_number, head_sha, delivery_id UNIQUE, verdict, violations_json, check_run_url,
+          created_at). Add GET /api/github/reviews (JWT-protected).              [§4.4, §4.8]
+[x] T3.8  Frontend PRBotPage.jsx: a "Simulated | Live reviews" tab switch. The live list shows repo,
+          PR link, verdict badge and time; the detail view reuses the existing violation cards.
+          Add githubReviews() to services/api.js.                                [§4.8]
+[x] T3.9  Tests in tests/test_github_app.py:
+          - HMAC valid/invalid/missing;
+          - recorded payload fixtures in tests/fixtures/github/;
+          - the GitHub API mocked with httpx.MockTransport, with the full flow for the 3 scenarios
+            (check conclusion, comment upsert, DB row);
+          - idempotent redelivery;
+          - token caching.                                                       [§4.9]
+          (2026-10-16: T3.5-T3.9 done. review_flow.ReviewFlow is installed by main.py at startup when
+          the app is configured. Decisions beyond the plan:
+          - specs are diffed against the PR's MERGE BASE (GET compare), not the base-branch tip, so
+            commits that landed on main later are not blamed on the PR;
+          - several openapi: specs are reviewed together (endpoints concatenated, then
+            diff_endpoints + review_endpoint_changes); an untouched spec is fetched once;
+          - conclusion respects fail_on (BLOCK under fail_on: never = neutral);
+          - bad config / SRS / spec = failure with the reason; a crash = failure + re-raise so a
+            redelivery retries; a completed PRReviewRun makes a redelivery a no-op (persisted
+            dedupe); a re-run creates a fresh check run (GitHub's recommended pattern);
+          - skipped / errored runs only edit an existing bot comment, they never post a new one;
+          - closing-keyword parser = src/review/intent.py find_linked_issues (also owner/repo#N and
+            issue URLs; code blocks and HTML comments ignored); merged with GraphQL
+            closingIssuesReferences; max 5 issues; an empty issue body falls back to the title;
+          - PRReviewRun unique on (delivery_id, repo, pr_number): one check_run delivery can cover
+            several PRs. Also stores pr_title/url/author, conclusion, title, summary, markdown,
+            report_json, linked_issues, comment_url, error. GET /api/github/reviews/{id} = detail.
+          - SRS parsing and embeddings run in asyncio.to_thread (the event loop keeps serving).
+          Webhook payloads are built inline in the tests (_pr_payload / _check_run_payload), not
+          recorded JSON fixtures. The 3 scenarios use the ecommerce_srs_ieee.docx fixture (real
+          temp-file + docx parser path) with a fake embedder. 411 tests pass.)
+[~] T3.10 Create the demo repo traceability-demo-store (only branch protection left):
+          - docs/SRS.docx (the ecommerce_srs_ieee fixture), openapi.yaml (store_v1) and
+            .traceability.yml;
+          - branch protection requiring the "Requirements Traceability" check;
+          - 3 issues and 3 PRs: discount_code = PASS, refund transaction_id removed = BLOCK REQ-04,
+            checkout 2FA dropped = BLOCK REQ-09.                                 [§4.7]
+          (2026-10-20: scripts/setup_demo_repo.py --verify builds it in ../traceability-demo-store: main =
+          SRS.docx + openapi.yaml + .traceability.yml; branches add_endpoint / remove_idempotency /
+          drop_2fa_requirement, each one commit, verified PASS / BLOCK REQ-04 / BLOCK REQ-09 with the real
+          engine. Issue/PR texts in scripts/demo_repo/. Left for the user: push, 3 issues, 3 PRs,
+          branch protection.)
+[x] T3.11 Write docs/github-app-setup.md: app registration, permissions, smee command
+          (npx smee-client -u <url> -t http://127.0.0.1:8000/api/github/webhook), env vars, branch
+          protection, and troubleshooting (redeliver, re-run).
+          Milestone done when: opening the 3 demo PRs gives PASS / BLOCK / BLOCK check runs and
+          comments, and the merge button is blocked on the 2 failing PRs.
+
+======================================================================
+M4  CI/CD PIPELINE INTEGRATION  (~1.5-2 days)   [§5]
+     (can run in parallel with M3 once M2 is done)
+======================================================================
+[x] T4.1  .github/workflows/ci.yml (push + PR):
+          - Python 3.11 with a pip cache and actions/cache on ~/.cache/huggingface;
+          - ruff check;
+          - pytest -m "not slow" on PRs and the full suite on main;
+          - frontend job: npm ci && npm run build.
+          Add a ruff config to pyproject.toml or ruff.toml.                     [§5.1]
+[x] T4.2  .github/workflows/compliance.yml (pull_request + push to main/develop):
+          - checkout with fetch-depth 0;
+          - get the base spec with `git show <base_sha>:<spec>` (github.event.before on push);
+          - run `python -m src.cli review --config .traceability.yml ... --fail-on block` (use
+            critical for push to main);
+          - append the report to $GITHUB_STEP_SUMMARY and upload report.json as an artifact;
+          - a non-zero exit fails the job.                                       [§5.2]
+[~] T4.3  Add a .traceability.yml to THIS repo pointing at data/requirements/ecommerce_srs.md (and
+          the .docx fixture) and data/api_specs/store_v1.json.
+[x] T4.4  Self-test job: review store_v1.json -> store_v2.json and EXPECT exit code 1, with REQ-04
+          and REQ-09 in report.json. The job fails if the gate stops blocking.   [§5.4]
+[~] T4.5  Root action.yml composite action (inputs config, base-ref, fail-on, python-version)
+          wrapping the CLI. Use it from the demo repo as a second, App-free gate. Document the
+          App-vs-Action trade-off in docs/github-app-setup.md.                   [§5.3]
+[ ] T4.6  Mark the CI and compliance checks as required on this repo's main branch, and add a
+          README badge.
+          Milestone done when: a PR that breaks REQ-04 is blocked by CI, and a clean PR passes.
+
+======================================================================
+M5  CODE-AWARE EXPANSION  (OPTIONAL PHASE 2, ~5+ days)   [§6]
+======================================================================
+[ ] T5.1  Implement PythonASTArtifactSource in src/alignment/sources.py. One unit per
+          function/class, with text made of:
+          - qualified name, signature with type hints, docstring;
+          - decorators (FastAPI route = endpoint link);
+          - pydantic field names;
+          - called names one hop out.
+          location = path:line.
+[ ] T5.2  Implement GitDiffArtifactSource: git diff --unified=0 base...head, map each hunk to its
+          enclosing symbol through the AST, and emit the changed symbols.
+[ ] T5.3  Implement SiameseBertAlignmentScorer (jina-embeddings-v2-base-code,
+          trust_remote_code=True) and CompositeAlignmentScorer (scorer by ArtifactUnit.kind). Add an
+          optional CrossEncoderReranker on the top-K.
+[ ] T5.4  Contract tests that every AlignmentScorer must pass: bounds [0,1], determinism, ranks,
+          and one result per pair (roadmap Phase A).
+[ ] T5.5  Demo FastAPI service (~15 handlers) plus data/ground_truth/code_labels.csv. Evaluate
+          P/R/F1/MAP with src/evaluator.py, comparing jina+composite against mpnet-only.
+          Gate: per-AC F1 >= 0.75.
+[ ] T5.6  Engine and bot integration: if `code.paths` is set in .traceability.yml and the PR changes
+          code but no spec, review code units. Check whether REQ-04 field-level drift is now caught.
+
+======================================================================
+M6  EVALUATION, DOCUMENTATION, SUBMISSION  (~2-3 days)   [§7]
+======================================================================
+[ ] T6.1  Extraction accuracy table: P/R of extracted requirements per fixture and for the 2 or
+          more real-world SRS files, plus noise removed per category.
+[ ] T6.2  Metric parity table: .md vs .docx vs .pdf (F1/P/R/MAP, TF-IDF baseline), for both the
+          ecommerce and banking datasets.
+[ ] T6.3  Live bot evaluation on the 3 demo PRs (1 PASS / 2 BLOCK): screenshots of the check runs,
+          comments and blocked merge; webhook-to-check latency; comment quality with the LLM on
+          and off.
+[ ] T6.4  CI evaluation: self-test result, and cold vs warm cache run time.
+[ ] T6.5  Optional: a GROUND_TRUTH doc type (.csv upload) so uploaded projects compute their own
+          metrics. This closes the FR11 gap.
+[ ] T6.6  Update docs/validation_results.md, startup_guide.md, docs/PROJECT_REPORT_SOURCE.md,
+          docs/architecture/semantic-alignment-roadmap.md (tick off Phases A/B/E) and the
+          architecture diagram.
+[ ] T6.7  Project-II report chapters: industrial SRS ingestion methodology, live workflow
+          integration (App + Action), results. Rehearse the viva demo: upload docx -> preview ->
+          analyse -> open the PR -> blocked.
+[ ] T6.8  Paper and provisional patent: method (block-IR SRS extraction -> semantic traceability ->
+          tiered regression gate -> workflow enforcement), results tables, related work (from the
+          report's literature review).
+
+======================================================================
+OUT OF SCOPE / LATER
+======================================================================
+- OCR for scanned PDFs (Tesseract)
+- Legacy .doc / .docm, ReqIF and DOORS exports
+- JiraContextSource (roadmap Phase C)
+- AST sources for languages other than Python
+- Hosting the GitHub App in the cloud (Render/Railway/Fly) instead of smee
+- Fine-tuning a custom model, and a false-positive feedback loop

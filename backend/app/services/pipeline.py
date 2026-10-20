@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
 # Bring in the existing src/ modules
@@ -93,7 +92,7 @@ def build_graph_payload(
     # Endpoint v1 nodes
     drifted_ids = set()
     if drift_df is not None:
-        drifted_ids = set(drift_df[drift_df["drifted"] == True]["endpoint_id"].tolist())
+        drifted_ids = set(drift_df[drift_df["drifted"] == True]["endpoint_id"].tolist())  # noqa: E712 (pandas mask)
 
     for ep in endpoints_v1:
         ep_id = ep["id"]

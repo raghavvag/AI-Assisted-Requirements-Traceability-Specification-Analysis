@@ -56,5 +56,25 @@ class Settings(BaseSettings):
     # CORS
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # Uploads
+    UPLOAD_DIR: str = str(_BACKEND_DIR / "uploads")
+    MAX_UPLOAD_MB: int = 10                 # per file
+    MAX_DOCX_UNCOMPRESSED_MB: int = 50      # zip-bomb guard for .docx
+
+    # GitHub App (PR review bot). See manual.md §D and docs/plan.md §4.
+    GITHUB_APP_ID: str = ""                         # numeric App ID from the app's settings page
+    GITHUB_APP_PRIVATE_KEY_PATH: str = ""           # path to the downloaded .pem (keep it OUTSIDE the repo)
+    GITHUB_APP_PRIVATE_KEY: str = ""                # alternative: the PEM itself (CI / hosting secrets); "\n" escapes allowed
+    GITHUB_WEBHOOK_SECRET: str = ""                 # the "Webhook secret" entered when registering the app
+    GITHUB_APP_SLUG: str = ""                       # e.g. "traceability-bot" (from the app URL)
+    GITHUB_CHECK_NAME: str = "Requirements Traceability"
+    GITHUB_API_URL: str = "https://api.github.com"  # GitHub Enterprise: https://<host>/api/v3
+
+    @property
+    def github_app_configured(self) -> bool:
+        """App ID + a private key + webhook secret are all present."""
+        has_key = bool(self.GITHUB_APP_PRIVATE_KEY.strip()) or bool(self.GITHUB_APP_PRIVATE_KEY_PATH.strip())
+        return bool(self.GITHUB_APP_ID.strip()) and has_key and bool(self.GITHUB_WEBHOOK_SECRET)
+
 
 settings = Settings()

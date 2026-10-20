@@ -75,13 +75,12 @@ On top of that matrix we add four things:
 
 ## 4. What we actually built (implementation)
 
-This is not a slide-deck idea. It is a working system, delivered two ways.
+This is not a slide-deck idea. It is a working system: one Python pipeline behind a web app.
 
-### A. Research pipeline + Streamlit dashboard
+### A. Research pipeline
 
-Seven Python modules (parser, embedder, similarity, drift detector, explainer, PR reviewer,
-evaluator) and a 5-tab dashboard: Traceability Heatmap, Drift Analysis, PR Reviewer,
-Evaluation Metrics, and a Vector Database Inspector.
+Python modules (SRS reader for Word / PDF / Markdown, parser, embedder, similarity, drift
+detector, explainer, PR reviewer, evaluator) that the web app calls.
 
 ### B. Full production web app
 
@@ -207,5 +206,5 @@ The next build is a **real GitHub App** (fully designed, in
    fix instruction.
 5. Open **Benchmarks** → show F1 0.71 vs 0.34 → "every number here is reproducible".
 
-Backup if offline: everything above also runs from `pytest -q` (59 passing tests) and the
-Streamlit app with the built-in dataset — no internet or API key required.
+Backup if offline: everything above also runs from `pytest -q` (165 passing tests) with the
+built-in dataset — no internet or API key required.

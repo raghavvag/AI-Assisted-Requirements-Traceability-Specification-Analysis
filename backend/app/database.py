@@ -2,7 +2,7 @@
 backend/app/database.py
 ========================
 Async SQLAlchemy 2.0 setup with aiosqlite.
-Models: User, Project, Document, AnalysisResult
+Models: User, Project, Document, AnalysisResult, PRReviewRun
 """
 
 import enum
@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import AsyncGenerator, List, Optional
 
 from sqlalchemy import (
-    JSON, DateTime, Enum, ForeignKey, Integer, String, Text, Boolean
+    JSON, DateTime, Enum, ForeignKey, Integer, String, Text, Boolean, UniqueConstraint
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -157,3 +157,42 @@ class AnalysisResult(Base):
     )
 
     project: Mapped["Project"] = relationship("Project", back_populates="results")
+
+
+class PRReviewRun(Base):
+    """One GitHub App review of a pull request head (docs/plan.md §4.4 step 9).
+
+    verdict: PASS | WARN | BLOCK (engine verdicts), SKIPPED (no config / no spec
+    change), ERROR (the review could not run). A completed row (anything but
+    ERROR) also makes a redelivered webhook a no-op, across restarts."""
+    __tablename__ = "pr_review_runs"
+    __table_args__ = (UniqueConstraint("delivery_id", "repo", "pr_number", name="uq_review_delivery_pr"),)
+
+    id              : Mapped[int]            = mapped_column(Integer, primary_key=True)
+    installation_id : Mapped[int]            = mapped_column(Integer, nullable=False)
+    repo            : Mapped[str]            = mapped_column(String(255), nullable=False, index=True)   # owner/name
+    pr_number       : Mapped[int]            = mapped_column(Integer, nullable=False)
+    pr_title        : Mapped[Optional[str]]  = mapped_column(String(512), nullable=True)
+    pr_url          : Mapped[Optional[str]]  = mapped_column(String(512), nullable=True)
+    pr_author       : Mapped[Optional[str]]  = mapped_column(String(255), nullable=True)
+    head_sha        : Mapped[str]            = mapped_column(String(64), nullable=False)
+    base_sha        : Mapped[Optional[str]]  = mapped_column(String(64), nullable=True)
+    delivery_id     : Mapped[Optional[str]]  = mapped_column(String(64), nullable=True, index=True)
+    trigger         : Mapped[Optional[str]]  = mapped_column(String(64), nullable=True)
+    verdict         : Mapped[str]            = mapped_column(String(16), nullable=False)
+    conclusion      : Mapped[Optional[str]]  = mapped_column(String(32), nullable=True)   # check-run conclusion
+    title           : Mapped[Optional[str]]  = mapped_column(String(255), nullable=True)  # check-run title
+    summary         : Mapped[Optional[str]]  = mapped_column(Text, nullable=True)
+    violations_json : Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    report_json     : Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)   # ReviewResult.to_dict() minus markdown
+    markdown        : Mapped[Optional[str]]  = mapped_column(Text, nullable=True)   # the PR comment
+    linked_issues   : Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    check_run_id    : Mapped[Optional[int]]  = mapped_column(Integer, nullable=True)
+    check_run_url   : Mapped[Optional[str]]  = mapped_column(String(512), nullable=True)
+    comment_url     : Mapped[Optional[str]]  = mapped_column(String(512), nullable=True)
+    error           : Mapped[Optional[str]]  = mapped_column(Text, nullable=True)
+    created_at      : Mapped[datetime]       = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )

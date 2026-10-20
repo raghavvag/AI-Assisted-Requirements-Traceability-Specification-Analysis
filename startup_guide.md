@@ -240,7 +240,8 @@ Should return `{"status":"ok","qdrant":{"status":"green",...}}`
 | `GET`  | `/api/auth/me` | Current user profile |
 | `POST` | `/api/projects` | Create project |
 | `GET`  | `/api/projects` | List user projects |
-| `POST` | `/api/projects/{id}/upload` | Upload SRS / API spec |
+| `POST` | `/api/projects/{id}/upload` | Upload SRS (`.docx` `.pdf` `.md` `.txt`, max 10 MB, requirements extracted on upload) / API spec (`.json` `.yaml`) |
+| `GET`  | `/api/projects/{id}/srs/requirements` | Requirements extracted from the SRS + extraction report (see `docs/srs-format-guide.md`) |
 | `POST` | `/api/projects/{id}/analyze` | Run full pipeline |
 | `GET`  | `/api/projects/{id}/matrix` | Traceability matrix + 3D graph |
 | `GET`  | `/api/projects/{id}/drift` | Drift delta report |
@@ -252,11 +253,29 @@ Full interactive docs: **[http://localhost:8000/api/docs](http://localhost:8000/
 
 ---
 
+## 6b. Headless CLI (no UI, no Qdrant, no API keys needed)
+
+The same engine the web app and the PR gate use, from a terminal or CI job:
+
+```bash
+# What does the parser find in an SRS document?
+python -m src.cli extract-srs tests/fixtures/srs/ecommerce_srs_ieee.docx          # add --json for machines
+
+# Traceability matrix + compliance (+ P/R/F1/MAP with ground truth)
+python -m src.cli analyze --srs data/requirements/ecommerce_srs.md     --spec data/api_specs/store_v1.json --ground-truth data/ground_truth/traceability_labels.csv
+
+# Gate an API change (reads .traceability.yml for srs, openapi, thresholds, fail_on)
+python -m src.cli review --base-spec data/api_specs/store_v1.json --head-spec data/api_specs/store_v2.json
+#   --format json  --fail-on block|critical|never  --issue-body issue.md  --output report.md  --no-explain
+```
+
+Exit codes: `0` pass/warn · `1` the change fails under `--fail-on` · `2` tool/config/input error.
+The demo change store_v1 → store_v2 exits **1**, blocking REQ-02, REQ-04 and REQ-09.
+
 ## 7. Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| `streamlit: not recognized` | Use `python -m streamlit run ...` |
 | `uvicorn: not recognized` | Use `python -m uvicorn app.main:app --reload --port 8000` from inside `backend/` |
 | Qdrant port 6338 already in use | An existing Qdrant container is running — fine, it will be reused |
 | **Google button won't load / `Error 403: origin_mismatch`** | The browser URL origin must be in the OAuth client's **Authorised JavaScript origins**. Add both `http://localhost:5173` and `http://127.0.0.1:5173`, then open the app via `http://localhost:5173`. |

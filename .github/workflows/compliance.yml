@@ -1,0 +1,152 @@
+# Semantic compliance gate (docs/plan.md §5.2, §5.4).
+#
+# gate:       reviews this repo's OpenAPI spec (the `openapi:` path in .traceability.yml) at the
+#             base commit against the head, scored against the SRS. A BLOCK fails the job; as a
+#             required check, that blocks the merge. Push to main only fails on Critical drift.
+# self-test:  store_v1 -> store_v2 contains two known drifts. The job fails if the gate ever
+#             stops blocking them (exit 1 with REQ-04 and REQ-09 expected).
+name: Compliance
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compliance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Optional: LLM explanations in the report. Without them, template text is used.
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  gate:
+    name: Requirements Traceability gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Restore Hugging Face cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-all-mpnet-base-v2-${{ runner.os }}-v1
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Fetch the base spec
+        id: base
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          spec=$(python -c "from src.config import load_config; print(load_config('.traceability.yml').openapi[0])")
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base=$(git merge-base "$PR_BASE_SHA" HEAD)       # same rule as the GitHub App
+          else
+            base="$PUSH_BEFORE"
+          fi
+          base_spec=none
+          if [ -n "$base" ] && ! [[ "$base" =~ ^0+$ ]] && git cat-file -e "$base:$spec" 2>/dev/null; then
+            base_spec="$RUNNER_TEMP/base-spec.${spec##*.}"
+            git show "$base:$spec" > "$base_spec"
+          fi
+          echo "Reviewing $spec: ${base:0:7} -> ${GITHUB_SHA:0:7} (base spec: $base_spec)"
+          echo "spec=$spec" >> "$GITHUB_OUTPUT"
+          echo "base_spec=$base_spec" >> "$GITHUB_OUTPUT"
+
+      - name: Review the change
+        id: review
+        env:
+          FAIL_ON: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'critical' || 'block' }}
+        run: |
+          set +e -o pipefail
+          python -m src.cli review --config .traceability.yml \
+            --base-spec "${{ steps.base.outputs.base_spec }}" --head-spec "${{ steps.base.outputs.spec }}" \
+            --format md --fail-on "$FAIL_ON" | tee report.md
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          python -m src.cli review --config .traceability.yml \
+            --base-spec "${{ steps.base.outputs.base_spec }}" --head-spec "${{ steps.base.outputs.spec }}" \
+            --format json --no-explain --fail-on never --output report.json > /dev/null
+
+      - name: Job summary
+        if: always()
+        run: cat report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "No report produced." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: traceability-report
+          path: |
+            report.md
+            report.json
+          if-no-files-found: ignore
+
+      - name: Enforce the verdict
+        if: steps.review.outputs.exit_code != '0'
+        run: |
+          echo "::error title=Requirements Traceability::Exit code ${{ steps.review.outputs.exit_code }}: the change weakens requirements the baseline satisfied (or the review failed). See the job summary."
+          exit 1
+
+  self-test:
+    name: Gate self-test (known drift must block)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Restore Hugging Face cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-all-mpnet-base-v2-${{ runner.os }}-v1
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Review store_v1 -> store_v2 and expect BLOCK
+        run: |
+          set +e
+          python -m src.cli review --config .traceability.yml \
+            --base-spec data/api_specs/store_v1.json --head-spec data/api_specs/store_v2.json \
+            --format json --no-explain --fail-on block --output selftest.json > /dev/null
+          code=$?
+          set -e
+          python - "$code" <<'EOF'
+          import json, sys
+          code = int(sys.argv[1])
+          report = json.load(open("selftest.json", encoding="utf-8"))
+          blocked = sorted({v["requirement_id"] for v in report["violations"]})
+          print(f"exit={code} verdict={report['verdict']} violations={blocked}")
+          missing = {"REQ-04", "REQ-09"} - set(blocked)
+          if code != 1 or report["verdict"] != "BLOCK" or missing:
+              sys.exit(f"::error::The gate no longer blocks the known drift (missing: {sorted(missing) or '-'}).")
+          EOF

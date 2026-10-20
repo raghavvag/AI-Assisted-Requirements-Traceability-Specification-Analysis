@@ -46,7 +46,7 @@ cases plug into, so we never rewrite the core twice.
                                 │
                 ┌───────────────┴───────────────┐
                 ▼                               ▼
-      Streamlit / React dashboard      GitHub Actions PR check
+      React dashboard                  GitHub Actions PR check
 ```
 
 The contracts live in [`src/alignment/base.py`](../../src/alignment/base.py):

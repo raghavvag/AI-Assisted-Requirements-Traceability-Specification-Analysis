@@ -19,9 +19,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
-from app.database import AnalysisResult, Document, DocType, Project, User, get_db
+from app.database import AnalysisResult, Document, DocType, User, get_db
 from app.routers.projects import _get_project_or_404
-from app.schemas import AnalyzeRequest, BenchmarkResponse, DriftResponse, MatrixResponse, ModelMetrics, PRReviewResponse
+from app.schemas import AnalyzeRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["analysis"])
@@ -68,7 +68,7 @@ async def analyze_project(
     Orchestrates: Parse → Embed → Qdrant upsert → Matrix → Drift → Graph.
     Runs synchronously (use background_tasks for async in production).
     """
-    project = await _get_project_or_404(project_id, current_user, db)
+    await _get_project_or_404(project_id, current_user, db)
 
     srs_path = await _get_doc_path(project_id, DocType.SRS, db)
     v1_path  = await _get_doc_path(project_id, DocType.API_V1, db)
@@ -96,6 +96,13 @@ async def analyze_project(
             drift_threshold=body.drift_threshold,
             gt_path=gt_path,
         )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=f"An uploaded file is missing; upload it again. ({e})")
+    except ValueError as e:
+        # Unusable input (no requirements in the SRS, spec without paths, ...):
+        # the user can fix this, so it is a 422, not a server error.
+        logger.warning("Analysis input rejected for project %d: %s", project_id, e)
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.exception("Pipeline failed for project %d", project_id)
         raise HTTPException(status_code=500, detail=f"Pipeline error: {e}")
@@ -187,7 +194,7 @@ async def pr_review(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Simulates a CI/CD PR bot review using the shared PRReviewer."""
+    """Runs a built-in PR scenario through the shared review engine (src/review)."""
     import sys
     sys.path.insert(0, str(ROOT))
     from src.pr_reviewer import PRReviewer, resolve_scenario_key
@@ -208,12 +215,15 @@ async def pr_review(
 
     reviewer = PRReviewer(embedder=embedder, explainer=explainer)
     resolved = resolve_scenario_key(scenario)
-    comment, violations = reviewer.run_pr_review(resolved, requirements, req_embeddings)
+    result = reviewer.review(resolved, requirements, req_embeddings)
     return {
         "scenario":       resolved,
-        "approved":       len(violations) == 0,
-        "violations":     violations,
-        "review_comment": comment,
+        "verdict":        result.verdict.value,          # PASS | WARN | BLOCK
+        "approved":       result.approved,
+        "summary":        result.summary,
+        "violations":     [v.to_dict() for v in result.violations],
+        "changes":        [c.to_dict() for c in result.diff.changes],
+        "review_comment": result.markdown,
     }
 
 

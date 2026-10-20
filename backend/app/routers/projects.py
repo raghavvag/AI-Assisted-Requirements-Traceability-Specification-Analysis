@@ -6,22 +6,28 @@ All operations enforce user_id ownership (AuthZ).
 """
 
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.database import AnalysisResult, Document, DocType, Project, User, get_db
-from app.schemas import DocumentOut, ProjectCreate, ProjectOut
+from app.schemas import (
+    DocumentOut, DocumentUploadOut, ExtractionSummary, ProjectCreate, ProjectOut, SrsRequirementsOut,
+)
+from app.services import srs_ingest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
-UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
+UPLOAD_DIR = Path(settings.UPLOAD_DIR)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -135,7 +141,7 @@ async def delete_project(
 # File Upload
 # ---------------------------------------------------------------------------
 
-@router.post("/{project_id}/upload", response_model=DocumentOut, status_code=201)
+@router.post("/{project_id}/upload", response_model=DocumentUploadOut, status_code=201)
 async def upload_document(
     project_id: int,
     doc_type: str = Form(..., description="SRS | API_V1 | API_V2"),
@@ -144,46 +150,56 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Upload an SRS or OpenAPI spec file for a project.
-    Accepts: .md, .txt, .json, .yaml, .yml
-    Performs upsert (one document per doc_type per project).
+    Upload an SRS or OpenAPI spec file for a project (one document per doc_type).
+
+    SRS:     .docx, .pdf, .md, .txt. The requirements are extracted immediately;
+             a document with no recognisable requirements is rejected with 422
+             and an extraction report explaining what was seen.
+    API_V*:  .json, .yaml, .yml, checked for an OpenAPI 'paths' section.
     """
-    # Validate doc_type
     try:
         dtype = DocType[doc_type.upper()]
     except KeyError:
         raise HTTPException(status_code=400, detail=f"Invalid doc_type '{doc_type}'. Use SRS, API_V1, or API_V2.")
 
-    project = await _get_project_or_404(project_id, current_user, db)
+    await _get_project_or_404(project_id, current_user, db)
 
-    # Validate file extension
-    allowed = {".md", ".txt", ".json", ".yaml", ".yml"}
-    ext = Path(file.filename).suffix.lower()
-    if ext not in allowed:
-        raise HTTPException(status_code=400, detail=f"File type '{ext}' not allowed.")
+    # Read at most limit+1 bytes so an oversized upload is not held in memory.
+    content = await file.read(srs_ingest.max_upload_bytes() + 1)
+    ext = srs_ingest.validate_upload(dtype, file.filename or "", content)
 
-    # Save file
     proj_dir = UPLOAD_DIR / str(project_id)
     proj_dir.mkdir(parents=True, exist_ok=True)
     save_path = proj_dir / f"{dtype.value}{ext}"
-    with open(save_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
+    tmp_path = proj_dir / f".{dtype.value}.upload{ext}"
+    tmp_path.write_bytes(content)
 
-    # Read raw text for storage
+    extraction = None
     try:
-        raw_text = content.decode("utf-8", errors="replace")
-    except Exception:
-        raw_text = None
+        if dtype is DocType.SRS:
+            reqs, report = await run_in_threadpool(
+                srs_ingest.parse_srs, tmp_path, file.filename or save_path.name
+            )
+            raw_text = srs_ingest.dump_extraction(reqs, report)
+            extraction = srs_ingest.summary_of(reqs, report)
+        else:
+            raw_text = content.decode("utf-8-sig", errors="replace")
+        os.replace(tmp_path, save_path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
 
-    # Upsert Document record
+    # A re-upload with a different extension must not leave the old file behind.
+    for stale in proj_dir.glob(f"{dtype.value}.*"):
+        if stale != save_path:
+            stale.unlink(missing_ok=True)
+
     result = await db.execute(
         select(Document).where(
             (Document.project_id == project_id) & (Document.doc_type == dtype)
         )
     )
     doc = result.scalar_one_or_none()
-
     if doc:
         doc.file_path = str(save_path)
         doc.original_filename = file.filename
@@ -198,8 +214,49 @@ async def upload_document(
 
     await db.commit()
     await db.refresh(doc)
-    logger.info("Uploaded %s for project %d", dtype.value, project_id)
-    return DocumentOut.model_validate(doc)
+    logger.info("Uploaded %s (%s) for project %d", dtype.value, ext, project_id)
+    out = DocumentUploadOut.model_validate(doc)
+    out.extraction = ExtractionSummary(**extraction) if extraction else None
+    return out
+
+
+@router.get("/{project_id}/srs/requirements", response_model=SrsRequirementsOut)
+async def get_srs_requirements(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    The requirements extracted from the project's SRS, with the extraction
+    report, for review before analysis. Falls back to the built-in demo SRS
+    (is_default = true) when nothing has been uploaded, mirroring /analyze.
+    """
+    await _get_project_or_404(project_id, current_user, db)
+    result = await db.execute(
+        select(Document).where((Document.project_id == project_id) & (Document.doc_type == DocType.SRS))
+    )
+    doc = result.scalar_one_or_none()
+
+    if doc is None:
+        reqs, report = await run_in_threadpool(
+            srs_ingest.parse_srs, srs_ingest.DEFAULT_SRS, srs_ingest.DEFAULT_SRS.name
+        )
+        return SrsRequirementsOut(filename=srs_ingest.DEFAULT_SRS.name, is_default=True,
+                                  requirements=reqs, report=report)
+
+    cached = srs_ingest.load_extraction(doc.raw_text)
+    if cached is None:
+        # Uploaded before extraction was stored (older .md uploads): parse now and cache.
+        path = Path(doc.file_path)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="The uploaded SRS file is missing; upload it again.")
+        reqs, report = await run_in_threadpool(srs_ingest.parse_srs, path, doc.original_filename or path.name)
+        doc.raw_text = srs_ingest.dump_extraction(reqs, report)
+        await db.commit()
+    else:
+        reqs, report = cached
+    return SrsRequirementsOut(filename=doc.original_filename or Path(doc.file_path).name,
+                              requirements=reqs, report=report)
 
 
 @router.get("/{project_id}/documents", response_model=List[DocumentOut])

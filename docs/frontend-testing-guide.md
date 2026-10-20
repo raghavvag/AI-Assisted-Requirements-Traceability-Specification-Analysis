@@ -36,15 +36,32 @@ If `google_client_id_loaded` is `false`, fix `backend/.env` and **restart uvicor
 | 13 | Sidebar → **Drift Analysis** | KPIs `100.0%` · `100.0%` · `2` · `0`, timeline chart, 2 drift cards |
 | 14 | Click the **REQ-09** card | LLM root-cause text appears (template text if no `OPENAI_API_KEY` — that is not a failure) |
 | 15 | Sidebar → **PR Bot** → scenario 1 → Run | 🟢 **PR Approved**, 0 violations, markdown says `PASS ✅` |
-| 16 | Scenario 2 → Run | 🔴 **PR Blocked**, 1 violation `REQ-04`, Δ ≈ `-0.061` |
-| 17 | Scenario 3 → Run | 🔴 **PR Blocked**, 1 violation `REQ-09`, Δ ≈ `-0.123` |
+| 16 | Scenario 2 → Run | 🔴 **PR Blocked**, 1 violation `REQ-04` (Minor Drift), Δ ≈ `-0.069` |
+| 17 | Scenario 3 → Run | 🔴 **PR Blocked**, 1 violation `REQ-09` (Minor Drift), Δ ≈ `-0.172` |
 | 18 | Sidebar → **Benchmarks** | Cards `0.62 / 1.00 / 0.71 / 1.00`; blue bars clearly above grey; 10-row table |
-| 19 | Dashboard → card → **Upload**, drop the three files from `data/` (see below), Upload | Toast "3 file(s) uploaded!", card shows `3 files uploaded` |
-| 20 | Try uploading a `.pdf` | Rejected by the dropzone |
+| 19 | Dashboard → card → **Upload**, drop the three files from `data/` (see below), Upload | Each slot shows a green message (`10 requirements extracted` for the SRS), then the **Review extracted requirements** step lists REQ-01…REQ-10 |
+| 20 | Try uploading a `.exe` or `.zip` as SRS | Rejected by the dropzone ("use .docx, .pdf, .md, .txt") |
 | 21 | Delete the project (trash icon → confirm) | Card gone; `/api/health` `vectors_count` drops by ~50 |
 | 22 | Sign out (sidebar, bottom) | Back at `/login`, `localStorage` empty |
 
 Step 19 files: `data/requirements/ecommerce_srs.md` → SRS · `data/api_specs/store_v1.json` → API_V1 · `data/api_specs/store_v2.json` → API_V2.
+
+### Formal SRS documents (.docx / .pdf)
+
+Fixtures are in `tests/fixtures/srs/` (regenerate with `python scripts/build_srs_fixtures.py --pdf`).
+Use a fresh project per row, or re-upload over the previous SRS.
+
+| # | Upload as SRS | Expect |
+|---|---|---|
+| D1 | `ecommerce_srs_ieee.docx` | Review step: **10** requirements · chips `Word`, `6 from requirement tables`, `4 from tagged headings / paragraphs`. "Boilerplate sections removed: Revision History · 1.2 Document Conventions · 1.3 Definitions… · 1.4 References · Appendix A: Glossary". REQ-01 → Location `table 3 / row 2`, priority `High` |
+| D2 | Then **Run Analysis** with `store_v1.json` / `store_v2.json` | Exactly the same numbers as the `.md` run (Expected values below) — same requirement text, same scores |
+| D3 | `ecommerce_srs_ieee.pdf` | 10 requirements, chip `PDF`; noise line mentions running headers/footers and "tables joined across pages" |
+| D4 | `messy_srs.docx` | 12 requirements (FR1 … FR-7, NFR-1, NFR-2 with an `NFR` chip), 1 warning "Duplicate ID FR-2 … ignored" |
+| D5 | `untagged_srs.docx` | 3 requirements with `generated ID` chips (`SRS-AUTO-001…`) and a warning to add IDs |
+| D6 | `scanned.pdf` | Red message under the slot: "This PDF has no text layer (it looks scanned)…" — nothing saved |
+| D7 | A Word file with no requirements (any letter / notes) | Red message "No requirements were found in '…'. The parser looks for …" |
+| D8 | A `.txt` renamed to `.docx` | "This is not a valid .docx file…" |
+| D9 | Project page → **SRS** button (header) | Drawer with the same preview; for a project with no upload it says "built-in demo SRS" |
 
 ---
 

@@ -58,6 +58,20 @@ export const projectsApi = {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
   docs:     (id)            => api.get(`/projects/${id}/documents`),
+  srsRequirements: (id)     => api.get(`/projects/${id}/srs/requirements`),
+}
+
+/**
+ * Human-readable message from an API error. FastAPI returns `detail` as a
+ * string, a {message, report} object (SRS extraction 422s) or a validation
+ * error list.
+ */
+export function apiError(err, fallback = 'Request failed.') {
+  const detail = err?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (detail?.message) return detail.message
+  if (Array.isArray(detail) && detail[0]?.msg) return detail[0].msg
+  return fallback
 }
 
 export const analysisApi = {
@@ -67,4 +81,10 @@ export const analysisApi = {
   prReview:  (id, scenario) => api.post(`/projects/${id}/pr-review`, null, { params: { scenario } }),
   benchmark: (id)          => api.get(`/projects/${id}/benchmark`),
   explain:   (id, reqId)   => api.get(`/projects/${id}/explain/${reqId}`),
+}
+
+// GitHub App (live PR reviews). params: { repo: 'owner/name', pr_number, limit }
+export const githubApi = {
+  reviews: (params)        => api.get('/github/reviews', { params }),
+  review:  (reviewId)      => api.get(`/github/reviews/${reviewId}`),
 }

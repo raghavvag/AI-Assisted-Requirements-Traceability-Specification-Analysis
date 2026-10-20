@@ -13,7 +13,6 @@ from typing import List, Optional
 import numpy as np
 
 from src.alignment.base import (
-    AlignmentBand,
     AlignmentResult,
     ArtifactUnit,
     ContextUnit,
