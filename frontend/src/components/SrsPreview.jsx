@@ -2,13 +2,14 @@
 // ---------------------------------------------------------------------------
 // What the SRS parser extracted from an uploaded document, shown BEFORE the
 // analysis runs: how many requirements, which strategy found them (tables /
-// tagged headings / shall statements), what boilerplate was removed, any
-// warnings, and every requirement with its source location in the document.
+// tagged headings / shall statements / diagrams), what boilerplate was
+// removed, which figures were read, any warnings, and every requirement with
+// its source location in the document.
 // ---------------------------------------------------------------------------
 
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
-import { AlertTriangle, ChevronDown, ChevronRight, FileText, Scissors, X } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronRight, FileText, Image as ImageIcon, Scissors, X } from 'lucide-react'
 
 import { apiError, projectsApi } from '../services/api'
 import { Loading } from './ui'
@@ -18,12 +19,16 @@ const STRATEGY_LABEL = {
   tagged:          'from tagged headings / paragraphs',
   shall_statement: 'from shall/must statements',
   legacy_markdown: 'from REQ-N blocks',
+  diagram:         'read from diagrams',
 }
 
 const SKIP_LABEL = {
   toc: 'table-of-contents lines',
   caption: 'captions',
-  image: 'images',
+  image: 'unreadable images',
+  image_too_small: 'icons / small images',
+  image_unreadable: 'unreadable images',
+  figure_ignored: 'figures (diagram reading off)',
   page_number: 'page numbers',
   running_header_footer: 'running headers/footers',
   repeated_header_row: 'repeated table headers',
@@ -77,6 +82,7 @@ function RequirementRow({ req }) {
         <span className="flex items-center gap-1.5 shrink-0">
           {req.type === 'non_functional' && <Chip>NFR</Chip>}
           {req.priority && <Chip tone="info">{req.priority}</Chip>}
+          {req.strategy === 'diagram' && <Chip tone="info">diagram</Chip>}
           {req.id_source === 'generated' && <Chip tone="warn">generated ID</Chip>}
         </span>
       </button>
@@ -88,12 +94,53 @@ function RequirementRow({ req }) {
             {req.section && <span>Section: <span className="text-white/55">{req.section}</span></span>}
             {req.strategy && <span>Found by: <span className="text-white/55">{req.strategy.replace('_', ' ')}</span></span>}
           </div>
+          {req.figures?.length > 0 && (
+            <p className="text-[11px] text-white/35">
+              {req.strategy === 'diagram' ? 'Read from ' : 'Illustrated by '}
+              {req.figures.map((f) => `${f.figure}${f.caption ? ` (${f.caption})` : ''}`).join(', ')}
+            </p>
+          )}
           {req.rationale && (
             <p className="text-[11px] text-white/35">Rationale (not used for matching): {req.rationale}</p>
           )}
         </div>
       )}
     </li>
+  )
+}
+
+/** Figures the diagram reader interpreted, and what each one contributed. */
+function FigureList({ figures }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="glass rounded-xl px-3 py-2.5 text-[12px] text-white/50">
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-2 text-left">
+        <ImageIcon size={13} className="text-white/30 shrink-0" />
+        <span className="flex-1">
+          Read <span className="text-white/75 font-medium tnum">{figures.length}</span> diagram{figures.length === 1 ? '' : 's'}
+        </span>
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+      </button>
+      {open && (
+        <ul className="mt-2 space-y-2">
+          {figures.map((f) => (
+            <li key={`${f.figure}-${f.locator}`} className="border-t border-white/5 pt-2">
+              <p className="text-white/75">
+                <span className="font-mono text-brand-300">{f.figure}</span>
+                {f.caption && <span> · {f.caption}</span>}
+              </p>
+              {f.summary && <p className="mt-0.5">{f.summary}</p>}
+              <p className="mt-0.5 text-white/35">
+                {f.diagram_type && f.diagram_type !== 'other' && <span>{f.diagram_type.replace('_', ' ')} · </span>}
+                read by {f.engine}
+                {f.requirements?.length > 0 && <span> · new: {f.requirements.join(', ')}</span>}
+                {f.illustrates?.length > 0 && <span> · illustrates: {f.illustrates.join(', ')}</span>}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -159,6 +206,8 @@ export default function SrsPreview({ data, maxListHeight = 'max-h-[46vh]' }) {
           )}
         </div>
       )}
+
+      {report.figures?.length > 0 && <FigureList figures={report.figures} />}
 
       <ul className={`glass rounded-xl overflow-y-auto ${maxListHeight}`}>
         {reqs.map((r) => <RequirementRow key={r.id} req={r} />)}

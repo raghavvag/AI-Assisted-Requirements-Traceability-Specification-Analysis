@@ -19,7 +19,7 @@ import re
 import unicodedata
 from typing import Iterable, List, Optional, Sequence
 
-from src.srs.blocks import Block, Heading, Paragraph, Table
+from src.srs.blocks import Block, Figure, Heading, Paragraph, Table
 from src.srs.options import ExtractionOptions
 from src.srs.report import ExtractionReport
 
@@ -122,6 +122,10 @@ _DOT_LEADER = re.compile(r"(?:\.{4,}|…{2,}|(?:\. ){4,})\s*[0-9ivxlc]{1,4}\s*$"
 _GLYPHS_ONLY = re.compile(r"^[\W_]+$")
 
 
+def is_caption(p: Paragraph) -> bool:
+    return (p.style or "").lower() == "caption" or bool(_CAPTION.match(p.text))
+
+
 def paragraph_noise_reason(p: Paragraph) -> Optional[str]:
     """Return a skip reason for a noise paragraph, else None."""
     style = (p.style or "").lower()
@@ -130,7 +134,7 @@ def paragraph_noise_reason(p: Paragraph) -> Optional[str]:
         return "empty"
     if style.startswith("toc") or style in {"table of figures", "index 1", "index 2"}:
         return "toc"
-    if style == "caption" or _CAPTION.match(text):
+    if is_caption(p):
         return "caption"
     if _DOT_LEADER.search(text):
         return "toc"
@@ -151,8 +155,9 @@ def filter_blocks(
     report: ExtractionReport,
 ) -> List[Block]:
     """Drop blocklisted sections (heading + everything until a heading of the
-    same or higher level) and noise paragraphs. Tables inside a blocklisted
-    section go with it (revision-history tables, glossary tables)."""
+    same or higher level) and noise paragraphs. Tables and figures inside a
+    blocklisted section go with it (revision-history tables, glossary tables,
+    appendix diagrams), so those figures are never sent to an interpreter."""
     out: List[Block] = []
     skip_level: Optional[int] = None
     skip_name = ""
@@ -188,5 +193,7 @@ def filter_blocks(
             if all(not cell.strip() for row in block.rows for cell in row):
                 report.skip("empty_table")
                 continue
+            out.append(block)
+        elif isinstance(block, Figure):
             out.append(block)
     return out

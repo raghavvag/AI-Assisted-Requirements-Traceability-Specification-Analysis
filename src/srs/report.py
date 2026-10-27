@@ -25,6 +25,10 @@ class ExtractionReport:
     duplicates: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     options_used: Dict[str, Any] = field(default_factory=dict)
+    # One entry per figure that reached interpretation: label, caption, locator,
+    # engine, diagram_type, summary, the requirements it produced and the
+    # existing requirements it illustrates (src/srs/diagrams.py).
+    figures: List[Dict[str, Any]] = field(default_factory=list)
 
     def skip(self, reason: str, n: int = 1) -> None:
         if n > 0:
@@ -49,6 +53,7 @@ class ExtractionReport:
             "duplicates": list(self.duplicates),
             "warnings": list(self.warnings),
             "options_used": dict(self.options_used),
+            "figures": [dict(f) for f in self.figures],
         }
 
     @classmethod
@@ -63,13 +68,16 @@ class ExtractionReport:
             duplicates=list(data.get("duplicates", [])),
             warnings=list(data.get("warnings", [])),
             options_used=dict(data.get("options_used", {})),
+            figures=[dict(f) for f in data.get("figures", [])],
         )
 
     def summary(self) -> str:
         """One line for logs / CLI output."""
         strategies = ", ".join(f"{n} from {k}" for k, n in self.by_strategy.most_common())
+        read = sum(1 for f in self.figures if f.get("engine"))
         return (
             f"{self.n_requirements} requirement(s) from {self.format or '?'}"
             + (f" ({strategies})" if strategies else "")
+            + (f"; {read}/{len(self.figures)} figure(s) read" if self.figures else "")
             + (f"; {len(self.warnings)} warning(s)" if self.warnings else "")
         )

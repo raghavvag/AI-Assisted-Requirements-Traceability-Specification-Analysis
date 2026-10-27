@@ -1,0 +1,707 @@
+===============================================================================
+ START HERE: AI-Assisted Requirements Traceability & Specification Analysis
+ How it is built, how to run it, and how to demo it (website + GitHub bot)
+ Last updated: 2026-10-21
+===============================================================================
+
+CONTENTS
+  1.  What the product does, in one minute
+  2.  Tech stack
+  3.  The vector database (Qdrant) and Docker
+  4.  One-time setup
+  5.  Running the project (every day)
+  6.  The smee webhook tunnel (for the GitHub bot)
+  7.  Which GitHub repository to use for issues and pull requests
+  8.  Sample SRS documents for the demo, and exactly what to point at
+  9.  Website demo script, click by click
+  10. Example GitHub issues (copy and paste)
+  11. The GitHub flow, step by step: issue -> branch -> PR -> bot -> merge
+  12. What to look for on GitHub (checklist)
+  13. Extra demo: a requirement that exists only as a UML diagram
+  14. Troubleshooting
+  15. Command cheat sheet
+
+
+-------------------------------------------------------------------------------
+1. WHAT THE PRODUCT DOES, IN ONE MINUTE
+-------------------------------------------------------------------------------
+Business people write requirements in an SRS (Word / PDF). Developers build an
+API (OpenAPI spec) and code. Over time the API drifts away from what the SRS
+asked for. We call this "specification drift".
+
+The product:
+  * reads the SRS (tables, tagged headings, "shall" sentences, and now even
+    UML diagrams) and the OpenAPI spec;
+  * turns every requirement and every endpoint into a 768-number "meaning
+    vector" and compares them (cosine similarity), giving a traceability
+    matrix;
+  * compares API v1 and v2 to find drift;
+  * explains every problem in plain English with an LLM;
+  * runs as a GitHub App: on every pull request it posts PASS / WARN / BLOCK
+    and can block the merge.
+
+
+-------------------------------------------------------------------------------
+2. TECH STACK
+-------------------------------------------------------------------------------
+FRONTEND (folder: frontend/)
+  - React 18 + Vite (dev server on http://localhost:5173)
+  - Tailwind CSS v4, Radix UI primitives, lucide-react icons
+  - motion / GSAP / Lenis for animation and smooth scrolling
+  - three.js 0.185 + react-three-fiber + react-force-graph-3d  -> the 3D graph
+  - Plotly (react-plotly.js)                                 -> heatmaps / charts
+  - react-markdown + remark-gfm                              -> shows bot comments
+  - @react-oauth/google                                      -> Google sign-in
+  - axios                                                    -> calls the API
+
+BACKEND (folder: backend/)
+  - Python 3.11, FastAPI + Uvicorn (API on http://localhost:8000)
+  - SQLAlchemy 2 (async) + aiosqlite -> SQLite file backend/traceability.db
+    (users, projects, documents, analysis results, PR review runs)
+  - Google OAuth 2.0 (google-auth) + JWT tokens (python-jose)
+  - httpx -> GitHub REST + GraphQL API (the GitHub App)
+  - GitHub App auth: RS256 app JWT -> installation token
+  - Webhook: HMAC-SHA256 signature check, then a background review job
+
+AI / NLP CORE (folder: src/, shared by the backend, the CLI and CI)
+  - sentence-transformers, model all-mpnet-base-v2 (768-dim) -> requirements
+    and endpoints
+  - jinaai/jina-embeddings-v2-base-code -> Python code (AST code scanning)
+  - scikit-learn TF-IDF -> the keyword baseline for the benchmarks
+  - OpenAI gpt-4o-mini (primary) / Groq llama-3.3-70b (fallback)
+      -> plain-English explanations (never the score)
+  - OpenAI gpt-4o-mini vision -> reads UML diagrams inside the SRS (opt-in)
+  - Tesseract OCR via pytesseract -> optional, offline diagram text
+  - python-docx (Word), pdfplumber + pypdfium2 (PDF), Pillow (images)
+  - prance + openapi-spec-validator (OpenAPI), PyYAML, pydantic (config)
+
+VECTOR DATABASE
+  - Qdrant, run with Docker (see section 3)
+
+DEVOPS
+  - Docker Compose (Qdrant only)
+  - GitHub Actions: .github/workflows/ci.yml (ruff + pytest + frontend build)
+    and compliance.yml (the traceability gate on this repo itself)
+  - action.yml: a reusable GitHub Action, so any repo can use the gate with
+    no server
+  - smee.io: a webhook tunnel from GitHub to your laptop
+  - pytest (482 tests), ruff (lint)
+
+HOW THE PIECES TALK
+  Browser (React :5173) --/api--> FastAPI (:8000) --> src/ pipeline
+                                         |--> SQLite (traceability.db)
+                                         |--> Qdrant (:6338, Docker)
+                                         |--> OpenAI (explanations, diagrams)
+  GitHub --webhook--> smee.io --> smee-client --> FastAPI /api/github/webhook
+  FastAPI --REST/GraphQL--> GitHub (check runs, comments, files)
+
+
+-------------------------------------------------------------------------------
+3. THE VECTOR DATABASE (QDRANT) AND DOCKER
+-------------------------------------------------------------------------------
+Which vector DB?  Qdrant (https://qdrant.tech), an open-source vector search
+                  engine.
+What it stores:   one 768-dim vector per requirement and per endpoint, in the
+                  collection "requirements_traceability". Every point has
+                  user_id + project_id in its payload, and every search is
+                  filtered by them, so users never see each other's data
+                  (multi-tenant).
+Port:             6338 (HTTP/REST) and 6339 (gRPC). We do NOT use Qdrant's
+                  default 6333, on purpose.
+
+IS DOCKER USED?
+  YES, but ONLY for Qdrant. docker-compose.yml has one service:
+      image qdrant/qdrant:latest, container "traceability_qdrant",
+      ports 6338/6339, data kept in the Docker volume "qdrant_data".
+  The backend and the frontend are NOT in Docker. You run them directly with
+  Python and Node (section 5).
+
+IS QDRANT REQUIRED?
+  No. If Qdrant is not running, the backend falls back to in-memory NumPy
+  similarity and gives the same results. Run Qdrant for the demo anyway,
+  because "vector database" is part of the architecture you present.
+
+COMMANDS (from the project root, Docker Desktop must be running)
+  docker compose up -d                       start Qdrant in the background
+  docker ps                                  should list traceability_qdrant
+  curl http://localhost:6338/readyz          expect: all shards are ready
+  start http://localhost:6338/dashboard      Qdrant's web UI: open the
+                                             collection and show the vectors
+  docker compose stop                        stop it (data is kept)
+  docker compose down -v                     stop AND delete all vectors
+
+CHECK FROM THE APP
+  http://localhost:8000/api/health  ->  "qdrant": {"status": "green", ...}
+
+
+-------------------------------------------------------------------------------
+4. ONE-TIME SETUP
+-------------------------------------------------------------------------------
+Prerequisites: Python 3.11, Node 18+ (npm 9+), Docker Desktop, Git,
+GitHub CLI (gh), and a Google account.
+
+4.1 Python packages (no venv is used on this machine)
+    cd D:\AI-Assisted-Requirements-Traceability-Specification-Analysis
+    pip install -r requirements.txt
+    pip install -r backend\requirements.txt
+    (The first analysis downloads all-mpnet-base-v2, about 420 MB, into
+    ~/.cache/huggingface. The first code review downloads jina, about 300 MB.
+    C: is nearly full, so keep at least 2 GB free.)
+
+4.2 Frontend packages
+    cd frontend
+    npm install
+
+4.3 Environment files (all are gitignored; templates end in .example)
+    a) Root .env (copy from .env.example)
+         OPENAI_API_KEY=sk-...          LLM explanations + diagram reading
+         OPENAI_MODEL=gpt-4o-mini
+         SRS_DIAGRAM_MODE=vision        read UML diagrams in uploaded SRS
+                                        (use "local" for offline, "off" to
+                                        ignore pictures)
+    b) backend\.env (copy from backend\.env.example)
+         SECRET_KEY=<python -c "import secrets;print(secrets.token_urlsafe(48))">
+         GOOGLE_CLIENT_ID=<...>.apps.googleusercontent.com
+         QDRANT_URL=http://localhost:6338
+         GITHUB_APP_ID=<App ID>
+         GITHUB_APP_PRIVATE_KEY_PATH=C:/keys/traceability-bot.pem
+                                        (FORWARD slashes; "\t" in a quoted
+                                        Windows path becomes a TAB)
+         GITHUB_WEBHOOK_SECRET=<the same secret as in the GitHub App>
+         GITHUB_APP_SLUG=traceability-bot
+    c) frontend\.env.local (copy from frontend\.env.local.example)
+         VITE_GOOGLE_CLIENT_ID=<the SAME client id as GOOGLE_CLIENT_ID>
+
+4.4 Google OAuth client (already done once; repeat only on a new machine)
+    Google Cloud Console -> Credentials -> OAuth client ID -> Web application.
+    Authorised JavaScript origins: http://localhost:5173 (and
+    http://127.0.0.1:5173). On the OAuth consent screen in "Testing" mode, add
+    your email as a Test user. Always open the app at http://localhost:5173.
+
+4.5 GitHub App (already done on 2026-10-16; details in docs/github-app-setup.md)
+    App "traceability-bot", installed only on raghavvag/traceability-demo-store.
+    Permissions: Checks R/W, Pull requests R/W, Issues R, Contents R, Metadata R.
+    Events: Pull request, Check run. Webhook URL = your smee channel.
+
+
+-------------------------------------------------------------------------------
+5. RUNNING THE PROJECT (EVERY DAY)
+-------------------------------------------------------------------------------
+Open 4 PowerShell terminals at the project root, in this order:
+
+  TERMINAL 1  Qdrant
+      docker compose up -d
+
+  TERMINAL 2  Backend (FastAPI)
+      cd backend
+      python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    Wait for this log line:
+      "GitHub App configured (app id ...); webhook at /api/github/webhook"
+    Check: http://localhost:8000/api/health   (status ok, qdrant green,
+           config.github_app_configured = true, openai_key_loaded = true)
+    API docs (Swagger): http://localhost:8000/api/docs
+    NOTE: --reload does not watch .env. After editing .env, stop (Ctrl+C) and
+    start uvicorn again.
+
+  TERMINAL 3  Frontend (React)
+      cd frontend
+      npm run dev
+    Open http://localhost:5173  (localhost, NOT 127.0.0.1)
+
+  TERMINAL 4  Webhook tunnel (only needed for the GitHub bot, section 6)
+      npx smee-client -u https://smee.io/<your-channel> -t http://127.0.0.1:8000/api/github/webhook
+
+Optional self-checks (no servers needed):
+      python -m pytest -q -m "not slow"         fast tests, about 1.5 min
+      python scripts/e2e_system_test.py         full lifecycle, offline, ~1 min
+      python scripts/e2e_system_test.py --live-vision --live-llm   real models
+
+
+-------------------------------------------------------------------------------
+6. THE SMEE WEBHOOK TUNNEL (FOR THE GITHUB BOT)
+-------------------------------------------------------------------------------
+WHY: GitHub must send a "pull request opened" event to the backend, but the
+backend runs on your laptop (localhost), and GitHub cannot reach localhost.
+smee.io is a free public relay:
+  GitHub -> https://smee.io/<channel> -> smee-client (on your laptop)
+         -> http://127.0.0.1:8000/api/github/webhook
+
+STEPS
+  1. Use the channel that is already set as the GitHub App's Webhook URL
+     (GitHub -> Settings -> Developer settings -> GitHub Apps ->
+     traceability-bot -> General -> Webhook URL). A new channel from
+     https://smee.io -> "Start a new channel" also works, but then you must
+     paste it into the App's Webhook URL.
+  2. Start the backend first (terminal 2).
+  3. Run (terminal 4, keep it open for the whole demo):
+       npx smee-client -u https://smee.io/KWd6AiEOwb22QSU -t http://127.0.0.1:8000/api/github/webhook
+     IMPORTANT: use 127.0.0.1, NOT localhost. On Windows, Node resolves
+     localhost to IPv6 ::1, uvicorn listens on IPv4 only, and every event is
+     silently dropped, while GitHub still shows the delivery as "200".
+  4. Test it: App settings -> Advanced -> Recent Deliveries -> pick any
+     delivery -> Redeliver. smee-client prints "POST ... 202", or "200" for a
+     ping, and uvicorn logs the request.
+       401 = GITHUB_WEBHOOK_SECRET in backend\.env differs from the App's
+             secret.
+       503 = the App settings were not loaded; restart uvicorn.
+  5. Only ONE smee-client should run. Kill any old one that points at
+     "localhost".
+
+If smee-client was down when a PR was opened, smee does NOT replay it. Click
+"Redeliver" on that delivery, push an empty commit
+(git commit --allow-empty -m "retrigger"), or click "Re-run" on the PR's
+check.
+
+
+-------------------------------------------------------------------------------
+7. WHICH GITHUB REPOSITORY TO USE FOR ISSUES AND PULL REQUESTS
+-------------------------------------------------------------------------------
+USE:  https://github.com/raghavvag/traceability-demo-store
+      Local clone: D:\traceability-demo-store
+      The GitHub App is installed ONLY on this repo, so only PRs here get a
+      bot review.
+
+DO NOT raise demo PRs on the main project repository
+(raghavvag/AI-Assisted-Requirements-Traceability-Specification-Analysis).
+That repo has its own CI gate (GitHub Action), not the App.
+
+What is inside the demo repo (main branch):
+  docs/SRS.docx        an IEEE-830 Word SRS with REQ-01..REQ-10
+                       (copy of tests/fixtures/srs/ecommerce_srs_ieee.docx)
+  openapi.yaml         the store API v1 (20 endpoints)
+  .traceability.yml    tells the bot where the SRS and the spec are, the
+                       thresholds, and fail_on: block
+  app/*.py             a small FastAPI service (merged in PR #7 and PR #9),
+                       used by the code-scanning demo (the "code:" block in
+                       .traceability.yml)
+
+What already exists there (as of 2026-10-21):
+  ISSUES
+    #1 Support discount codes in the cart        (open)
+    #2 Simplify the refund API                   (open)
+    #3 Reduce checkout friction                  (open)
+  PULL REQUESTS
+    #4  feat(cart): apply promotional discount codes        Closes #1 -> PASS
+    #5  refactor(refund): server-generated refund reference Closes #2 -> BLOCK REQ-04
+    #6  refactor(checkout): remove the 2FA step-up gate     Closes #3 -> BLOCK REQ-09
+    #7  feat(app): add the FastAPI service + code scanning   MERGED  -> PASS
+    #8  refactor(refund): ... in the handler (Python only)  -> BLOCK REQ-04 (from code)
+    #9  feat(auth): 2FA step-up challenge and verification   MERGED  -> PASS
+    #10 refactor(checkout): drop the 2FA step-up gate (code) -> BLOCK REQ-09 (from code)
+  Keep #4/#5/#6/#8/#10 open as evidence. Do not merge the BLOCK ones.
+
+For a fresh live demo in front of an audience, open a NEW issue and PR
+(sections 10 and 11) so people watch the bot react in real time.
+
+
+-------------------------------------------------------------------------------
+8. SAMPLE SRS DOCUMENTS FOR THE DEMO, AND EXACTLY WHAT TO POINT AT
+-------------------------------------------------------------------------------
+READY-TO-UPLOAD COPIES OF EVERYTHING BELOW ARE IN THE documents\ FOLDER.
+One numbered subfolder per demo step; each file name starts with its upload
+slot (1_SRS__, 2_API_V1__, 3_API_V2__). Follow documents\README.txt for the
+order. The original locations are listed below for reference.
+
+Upload them on the website as "SRS", with data\api_specs\store_v1.json as
+API_V1 and data\api_specs\store_v2.json as API_V2 (except the banking one).
+
+(A) tests\fixtures\srs\ecommerce_srs_ieee.docx   <- MAIN DEMO DOCUMENT
+    A formal IEEE-830 Word SRS: cover page, revision history table, table of
+    contents, definitions, references, a requirement table, tagged headings,
+    an image with a caption, and an appendix glossary.
+    After upload, the "Review extracted requirements" screen shows. Point at:
+      * "Extracted 10 requirements", with chips "Word",
+        "6 from requirement tables" and "4 from tagged headings / paragraphs"
+      * "Boilerplate sections removed: Revision History . 1.2 Document
+        Conventions . 1.3 Definitions, Acronyms and Abbreviations .
+        1.4 References . Appendix A: Glossary"
+        -> "none of this noise reached the AI model"
+      * Noise removed: table-of-contents lines, captions, images
+      * Click REQ-01 -> Location "table 3 / row 2", Priority "High"
+        -> "every requirement is traceable back to its place in the Word file"
+      * REQ-07..REQ-10 -> Location "heading 12..15" (found by tagged headings)
+      * One warning: the context diagram has no alt text (with
+        SRS_DIAGRAM_MODE=vision it is read instead, see document E)
+    After Run Analysis, the same numbers as the plain-text demo:
+      100% compliance . 10 requirements . 20 endpoints . 18 strong pairs.
+
+(B) tests\fixtures\srs\ecommerce_srs_ieee.pdf
+    The same SRS exported as PDF. Point at: chip "PDF", the SAME 10
+    requirements, and the noise line mentioning running headers/footers and
+    "tables joined across pages". Message: "Word or PDF, same result".
+
+(C) tests\fixtures\srs\messy_srs.docx   <- shows robustness
+    A badly written SRS. Point at:
+      * 12 requirements with mixed ID styles: FR1, FR-2, FR-3 (written
+        "FR 3"), REQ-4 (written "[REQ-4]"), FR-5.1..FR-5.4 from a table with
+        merged cells
+      * NFR-1 and NFR-2 carry an "NFR" chip (typed as non-functional)
+      * Warning: "Duplicate ID FR-2 ... ignored"
+      * Tracked-change deletions are ignored; text in content controls is kept
+
+(D) tests\fixtures\srs\untagged_srs.docx
+    No IDs at all. Point at the "generated ID" chips (SRS-AUTO-001...) and the
+    warning that tells the author to add IDs.
+
+(E) Nexus_Store_SRS_v3.docx   <- THE DIAGRAM DEMO (new feature)
+    Generate it once:
+      python scripts\e2e_system_test.py --keep D:\demo_out
+    This creates D:\demo_out\Nexus_Store_SRS_v3.docx and
+    D:\demo_out\activity_diagram_REQ-09.png.
+    In this SRS, REQ-09 (two-factor authentication) is NOT written as text
+    anywhere. It exists ONLY as a UML activity diagram picture (Figure 2).
+    Requires SRS_DIAGRAM_MODE=vision in the root .env (restart uvicorn).
+    After upload, point at:
+      * "Extracted 10 requirements", chips "6 from requirement tables",
+        "3 from tagged headings", "1 read from diagrams"
+      * The "Read 2 diagrams" panel: FIG-1 (system context, architecture
+        diagram: context only, no requirement) and FIG-2 (activity diagram:
+        new REQ-09)
+      * REQ-09 has a "diagram" badge, Location "figure 2", and the text the
+        model read from the picture: "$500 or a new payment method", "OTP
+        expires in 5 minutes", "403 two_fa_required", "two_fa_token"
+        -> open activity_diagram_REQ-09.png next to it and compare
+      * The Appendix mock-up image was skipped (never sent to the model)
+    After Run Analysis: REQ-09 traces to POST /api/v1/auth/2fa/challenge
+    (~0.85), /2fa/verify and /checkout, and the Drift page flags REQ-09 in v2.
+
+(F) data\samples\banking\aurora_banking_srs.md + aurora_v1.json + aurora_v2.json
+    A different domain (banking). 8 requirements BNK-REQ-01..08, 15 endpoints
+    in v1, 13 in v2. Shows the numbers change after upload (step-up
+    authentication removed in v2). A Word version is
+    tests\fixtures\srs\banking_srs.docx.
+
+Errors worth showing (each one gives a clear red message, not a crash):
+  tests\fixtures\srs\scanned.pdf      -> "This PDF has no text layer"
+  any .txt renamed to .docx           -> "This is not a valid .docx file"
+  a Word letter with no requirements  -> "No requirements were found ..."
+
+
+-------------------------------------------------------------------------------
+9. WEBSITE DEMO SCRIPT, CLICK BY CLICK
+-------------------------------------------------------------------------------
+ 1. http://localhost:5173 -> landing page. Click Sign in -> "Sign in with
+    Google" -> you land on the Dashboard ("My Projects").
+ 2. "+ New Project" -> name "Nexus Store Demo" -> Create Project.
+ 3. On the project card click "Upload". Drop:
+      Requirements SRS  = ecommerce_srs_ieee.docx (or Nexus_Store_SRS_v3.docx)
+      API v1            = data\api_specs\store_v1.json
+      API v2            = data\api_specs\store_v2.json
+    Click "Upload Files".
+ 4. "Review extracted requirements" appears. Walk through the points in
+    section 8. Click "Looks good".
+ 5. Open the project -> Traceability page -> "Run Analysis". The first run
+    takes 30-60 s while the model loads. Expect 100% . 10 . 20 . 18.
+ 6. Switch views: Coverage, Graph (3D: rotate it, click a blue requirement
+    sphere), Heatmap (hover a cell for its score), Split.
+ 7. Sidebar -> Drift Analysis: 2 drift cards, REQ-09 (delta about -0.11) and
+    REQ-03 (delta about -0.11). Click "Explain" on REQ-09: the LLM writes
+    "What changed / Why it violates / Remediation".
+ 8. Sidebar -> Benchmarks: our model F1 0.71 vs TF-IDF 0.34, MAP 1.00.
+    "Measured, not assumed."
+ 9. Sidebar -> PR Bot -> "Simulated" tab: run the 3 scenarios
+    -> PASS, BLOCK REQ-04, BLOCK REQ-09.
+10. PR Bot -> "Live reviews" tab: the real GitHub PR reviews (section 11),
+    each with a verdict badge, PR link, check run and the exact comment.
+
+
+-------------------------------------------------------------------------------
+10. EXAMPLE GITHUB ISSUES (COPY AND PASTE)
+-------------------------------------------------------------------------------
+The bot reads the issue that the PR CLOSES. Its acceptance criteria (checkbox
+lines, or bullets under an "Acceptance criteria" heading) are checked against
+the endpoints the PR adds or modifies.
+
+ISSUE A  (leads to PASS)
+  Title: Support discount codes in the cart
+  Body:
+    Shoppers want to use promotional codes in the cart, not only at the payment provider.
+
+    ## Acceptance criteria
+    - [ ] A shopper can apply a promotional discount_code to their shopping cart
+    - [ ] The cart response shows the discount applied and the recalculated subtotal
+    - [ ] An invalid or expired discount code is rejected with a validation error
+
+ISSUE B  (the PR that "solves" it gets BLOCKED on REQ-04)
+  Title: Simplify the refund API
+  Body:
+    Clients keep generating their own refund identifiers and getting them wrong. Let the server own the reference.
+
+    ## Acceptance criteria
+    - [ ] A refund request needs only order_id, refund_amount and reason
+    - [ ] The server generates a refund_reference and returns it in the response
+
+ISSUE C  (the PR that "solves" it gets BLOCKED on REQ-09)
+  Title: Reduce checkout friction
+  Body:
+    Checkout abandonment is high on large orders because of the extra verification step.
+
+    ## Acceptance criteria
+    - [ ] Checkout completes in a single request
+    - [ ] Orders are placed without an extra verification step, whatever their value
+
+ISSUE D  (leads to WARN: the PR delivers only half of the issue)
+  Title: Wishlist
+  Body:
+    Shoppers want to save products for later.
+
+    ## Acceptance criteria
+    - [ ] Users can save a product to a wishlist
+    - [ ] Users receive an email when the price of a wishlisted product drops below a target price
+
+Point to make: the business asked for something (issue C) that silently
+breaks an older requirement (REQ-09). Normal tests pass; our bot blocks it.
+
+
+-------------------------------------------------------------------------------
+11. THE GITHUB FLOW, STEP BY STEP: ISSUE -> BRANCH -> PR -> BOT -> MERGE
+-------------------------------------------------------------------------------
+Before you start: terminals 2 (backend) and 4 (smee-client) are running
+(section 5).
+
+Example: the WARN scenario (Issue D), done live.
+
+STEP 1  Create the issue
+  Website: github.com/raghavvag/traceability-demo-store -> Issues -> New issue
+  -> paste the title and body of ISSUE D -> Submit. Note its number, e.g. #11.
+  Or from the project root with the GitHub CLI:
+    gh issue create -R raghavvag/traceability-demo-store -t "Wishlist" -b "Shoppers want to save products for later.`n`n## Acceptance criteria`n- [ ] Users can save a product to a wishlist`n- [ ] Users receive an email when the price of a wishlisted product drops below a target price"
+
+STEP 2  Create a branch from main
+    cd D:\traceability-demo-store
+    git checkout main
+    git pull
+    git checkout -b feature/wishlist
+
+STEP 3  Make the change: add an endpoint to openapi.yaml under "paths:"
+        (same indentation as the other paths)
+      /api/v1/wishlist/items:
+        post:
+          summary: Save a product to the user's wishlist
+          description: Adds a product to the authenticated user's wishlist so it
+            can be bought later. Returns the wishlist with product_id and added_at
+            for each saved product.
+          requestBody:
+            required: true
+            content:
+              application/json:
+                schema:
+                  type: object
+                  required: [product_id]
+                  properties:
+                    product_id: {type: string, description: Product to save}
+          responses:
+            '201': {description: Product saved to the wishlist}
+
+STEP 4  Commit and push
+    git add openapi.yaml
+    git commit -m "feat: wishlist endpoint"
+    git push -u origin feature/wishlist
+
+STEP 5  Open the pull request. The body MUST link the issue.
+  Website: GitHub shows "Compare & pull request" -> base: main,
+  compare: feature/wishlist. Title "feat: wishlist". In the description write:
+        Adds a wishlist endpoint.
+
+        Closes #11
+  (Closes / Fixes / Resolves #N all work.) Click "Create pull request".
+  Or:
+    gh pr create -R raghavvag/traceability-demo-store -B main -H feature/wishlist -t "feat: wishlist" -b "Adds a wishlist endpoint.`n`nCloses #11"
+
+STEP 6  Watch the bot (5-20 seconds; the first review after a restart is
+        slower while models load)
+  * smee-client terminal: "POST http://127.0.0.1:8000/api/github/webhook - 202"
+  * uvicorn: "Queued review raghavvag/traceability-demo-store#12", then
+             "Reviewed ...#12 @ abc1234: WARN (neutral)"
+  * On the PR: the "Requirements Traceability" check goes from "in progress"
+    to neutral (grey), titled
+      "WARN: the linked issue is only partly delivered (50% covered)"
+  * A bot comment appears with "Linked-issue intent: 50% coverage" and lists
+    the unmet acceptance criterion (the price-drop email).
+
+STEP 7  React like a developer
+  * Fix it: add the missing endpoint (for example
+    POST /api/v1/wishlist/price-alerts), then commit and push to the SAME
+    branch. Every push triggers a new review, and the SAME comment is edited
+    (no spam).
+  * Or click "Re-run" on the Checks tab to review the same commit again.
+
+STEP 8  Merge
+  PASS (green) and WARN (grey) allow the merge. BLOCK (red) disables
+  "Merge pull request" IF branch protection is on: demo repo -> Settings ->
+  Branches (or Rules -> Rulesets) -> rule for main -> "Require status checks
+  to pass" -> add "Requirements Traceability". The check name appears in that
+  list only after the check has run at least once.
+
+STEP 9  Show it in the app
+  Website -> any project -> PR Bot -> "Live reviews": the new row, with the
+  verdict badge, PR link, check run and the exact comment.
+
+THE SAME FLOW FOR THE OTHER VERDICTS
+  PASS   Issue A + a PR that ADDS an optional field or endpoint
+         (existing PR #4 adds POST /api/v1/cart/discount)
+  BLOCK  Issue B + a PR whose refund endpoint drops transaction_id
+         (existing PR #5) -> "BLOCK: 1 requirement regressed", REQ-04
+  BLOCK  Issue C + a PR whose checkout drops two_fa_token and the 2FA
+         sentence (existing PR #6) -> REQ-09
+  BLOCK from CODE only: PR #8 (refund handler, Python) and PR #10 (2FA
+         step-up deleted in Python). openapi.yaml is untouched; the AST
+         scanner catches it.
+  The ready-made branches are in D:\traceability-demo-store (add_endpoint,
+  remove_idempotency, drop_2fa_requirement, ...). To recreate them:
+    python scripts\setup_demo_repo.py --verify
+
+OTHER OUTCOMES (also normal)
+  neutral "No specification change"  the PR did not touch the SRS, the spec,
+                                     .traceability.yml or the code paths
+  neutral "No .traceability.yml"     the file is missing at the PR's commit
+  failure "SRS not found" / "Invalid OpenAPI spec"
+                                     fix the file, then Re-run
+
+
+-------------------------------------------------------------------------------
+12. WHAT TO LOOK FOR ON GITHUB (CHECKLIST)
+-------------------------------------------------------------------------------
+On the PR page:
+  [ ] Checks: "Requirements Traceability" by traceability-bot
+        success = PASS, neutral = WARN, failure = BLOCK
+  [ ] Check title, e.g. "BLOCK: 1 requirement regressed"
+  [ ] Check details (click "Details"): a summary table with the SRS file, the
+      number of requirements, base/head commits, linked issues, and
+      Requirement | Endpoint | score base -> head | delta | severity
+  [ ] ONE bot comment (it starts with "AI Compliance Bot"). After each push it
+      is edited, never duplicated.
+  [ ] In the comment, for each violation:
+        Requirement  `REQ-09`
+        Defined in   SRS Figure 2 ... activity diagram ... read by
+                     vision:gpt-4o-mini   (only for diagram requirements)
+        Endpoint     `POST /api/v1/checkout` (modified)
+        v1.0 / v2.0 score and Score Delta (e.g. 0.6166 -> 0.5595, -0.057)
+        AI Root Cause Analysis: 1. What changed  2. Why it violates
+                                3. Remediation action
+  [ ] "Linked-issue intent": the coverage %, and which acceptance criteria are
+      unmet
+  [ ] Bottom line: "Merge is BLOCKED ..." / "allowed with warnings" /
+      "consistent"
+  [ ] With branch protection on, the merge button is disabled for BLOCK
+On your laptop:
+  [ ] smee-client shows the POST, and uvicorn shows "Queued review" and
+      "Reviewed ...: VERDICT"
+  [ ] Website -> PR Bot -> Live reviews has the new row
+
+Why BLOCK? The rule is deterministic, not the LLM. For each changed or removed
+endpoint, the bot re-scores it against its top-3 requirements. If a strong
+link (score >= 0.60) drops by 0.05 or more, or a medium link (>= 0.35) drops
+by 0.08 or more, the requirement "regressed" and the verdict is BLOCK.
+WARN = nothing regressed, but the linked issue is only partly delivered.
+
+
+-------------------------------------------------------------------------------
+13. EXTRA DEMO: A REQUIREMENT THAT EXISTS ONLY AS A UML DIAGRAM (GITHUB)
+-------------------------------------------------------------------------------
+This shows the newest feature live on GitHub: a PR is blocked because of a
+rule that is only drawn in a picture inside the SRS.
+(The backend reads OPENAI_API_KEY from the root .env.)
+
+ 1. Generate the SRS:  python scripts\e2e_system_test.py --keep D:\demo_out
+ 2. Put it in the demo repo with diagram reading switched on:
+      cd D:\traceability-demo-store
+      git checkout main
+      git pull
+      git checkout -b docs/srs-v3-diagrams
+      copy D:\demo_out\Nexus_Store_SRS_v3.docx docs\SRS.docx
+    Edit .traceability.yml: the "srs_extraction:" block must become
+        srs_extraction:
+          id_pattern: null
+          include_nfr: true
+          extra_blocklist: []
+          diagram_mode: vision          <- add this line (2-space indent)
+      git add docs\SRS.docx .traceability.yml
+      git commit -m "docs: SRS v3 with UML security workflows"
+      git push -u origin docs/srs-v3-diagrams
+    Open the PR -> the bot reviews the SRS change (no endpoint changed -> PASS)
+    -> merge it.
+ 3. Create an issue: "One-click checkout" (body: ISSUE C, section 10).
+ 4. Branch from the NEW main and change ONLY the checkout endpoint:
+      git checkout main
+      git pull
+      git checkout -b feature/one-click-checkout
+      git checkout origin/drop_2fa_requirement -- openapi.yaml
+      git diff --cached --stat main    (must show ONLY openapi.yaml)
+      git commit -m "refactor(checkout): one-click checkout without 2FA"
+      git push -u origin feature/one-click-checkout
+    Open the PR with "Closes #<issue number>".
+ 5. Expected: failure, "BLOCK: 1 requirement regressed", REQ-09. In the
+    comment, point at
+      "Defined in | SRS Figure 2: REQ-09 Two-Factor Authentication
+       Enforcement - activity diagram . activity diagram . read by
+       vision:gpt-4o-mini"
+    and say: "REQ-09 is not written anywhere as text. The bot read it from
+    the UML diagram and still protected it."
+ To undo: revert the SRS PR (GitHub "Revert" button) or keep it; older PRs
+ are unaffected, because each review reads the SRS at that PR's own commit.
+
+The same result is proven offline by the end-to-end test:
+  python scripts\e2e_system_test.py        -> 24/24 checks, including
+  "PR #102 ... -> BLOCK" on REQ-09 read from the diagram.
+
+
+-------------------------------------------------------------------------------
+14. TROUBLESHOOTING
+-------------------------------------------------------------------------------
+Symptom                                   Fix
+----------------------------------------  ------------------------------------
+Google login loops back / "wrong          GOOGLE_CLIENT_ID (backend\.env) and
+audience ... ['']"                        VITE_GOOGLE_CLIENT_ID (frontend) must
+                                          match; restart uvicorn; open
+                                          localhost:5173; add yourself as a
+                                          Test user
+/api/health: qdrant not green             Docker Desktop running?
+                                          docker compose up -d. The app still
+                                          works without it (NumPy fallback)
+PR opened but nothing in uvicorn          smee-client not running, or it
+                                          targets "localhost". Use 127.0.0.1;
+                                          Redeliver from Recent Deliveries
+Delivery shows 401                        webhook secret mismatch; fix
+                                          backend\.env and restart
+Uvicorn: "settings are present but        private key path wrong. Use forward
+unusable"                                 slashes: C:/keys/traceability-bot.pem
+Check stuck "in progress"                 first run downloads the models
+                                          (minutes); watch uvicorn; then Re-run
+Check neutral "No specification change"   the PR did not touch watched files;
+                                          expected
+Explanations say "no LLM configured"      OPENAI_API_KEY missing in .env;
+                                          restart uvicorn (the verdict is
+                                          unaffected)
+Diagram not read / warning "OCR           set SRS_DIAGRAM_MODE=vision in the
+(Tesseract) is not installed"             root .env (or diagram_mode: vision in
+                                          .traceability.yml) and restart
+Merge still possible on BLOCK             branch protection not set, or admin
+                                          bypass allowed
+Disk full errors                          C: and D: have about 2 GB free; clear
+                                          caches before downloading models
+
+
+-------------------------------------------------------------------------------
+15. COMMAND CHEAT SHEET
+-------------------------------------------------------------------------------
+  docker compose up -d                                         Qdrant
+  cd backend; python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+  cd frontend; npm run dev                                     website
+  npx smee-client -u https://smee.io/<channel> -t http://127.0.0.1:8000/api/github/webhook
+  http://localhost:8000/api/health                             health / config
+  http://localhost:8000/api/docs                               API (Swagger)
+  http://localhost:6338/dashboard                              Qdrant UI
+  python -m src.cli extract-srs tests\fixtures\srs\ecommerce_srs_ieee.docx
+                                                               parse an SRS in the terminal
+  python -m src.cli review --srs data\requirements\ecommerce_srs.md --base-spec data\api_specs\store_v1.json --head-spec data\api_specs\store_v2.json --format md
+                                                               CI-style review (exit 1 = BLOCK)
+  python scripts\e2e_system_test.py [--live-vision --live-llm] full lifecycle test
+  python scripts\setup_demo_repo.py --verify                   rebuild the demo branches
+  python -m pytest -q                                          all 482 tests (~3-5 min)
+
+More detail: docs/project_overview.md (pitch, features, journey),
+docs/github-app-setup.md (App + smee + branch protection),
+docs/srs-format-guide.md (what the SRS parser accepts),
+docs/frontend-testing-guide.md (expected numbers on every screen),
+manual.md (your open to-dos).

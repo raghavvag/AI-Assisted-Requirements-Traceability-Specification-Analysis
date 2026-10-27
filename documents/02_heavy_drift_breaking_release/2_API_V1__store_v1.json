@@ -1,0 +1,869 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Nexus E-Commerce Platform API",
+    "description": "Complete REST API specification for the Nexus E-Commerce Platform. This specification is the v1.0 baseline — fully compliant with all 10 requirements in the SRS.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Nexus Engineering Team",
+      "email": "api@nexus-ecommerce.example.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.nexus-ecommerce.example.com",
+      "description": "Production server"
+    }
+  ],
+  "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "authLogin",
+        "summary": "Authenticate user and issue JWT session token",
+        "description": "Validates user credentials (email and hashed password) and issues a signed JWT access token with configurable expiry. Returns a unique session_id for session management and audit trail purposes. Satisfies REQ-01: User Authentication and Session Management.",
+        "tags": ["Authentication"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "Registered user email address"
+                  },
+                  "password": {
+                    "type": "string",
+                    "description": "User password (transmitted over TLS; hashed server-side)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authentication successful. Returns JWT access token, token expiry time, and a unique session_id for session tracking and revocation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "access_token": {
+                      "type": "string",
+                      "description": "Signed JWT access token"
+                    },
+                    "token_type": {
+                      "type": "string",
+                      "example": "Bearer"
+                    },
+                    "expires_in": {
+                      "type": "integer",
+                      "description": "Token expiry time in seconds (configurable)"
+                    },
+                    "session_id": {
+                      "type": "string",
+                      "description": "Unique session identifier for audit trail and session revocation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "authLogout",
+        "summary": "Revoke authenticated session and invalidate JWT token",
+        "description": "Invalidates the current JWT session token using the provided session_id. Ensures the session is removed from the active session registry, supporting secure logout and session audit trail integrity. Satisfies REQ-01.",
+        "tags": ["Authentication"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "description": "The unique session identifier to revoke"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session successfully revoked. The JWT token is invalidated and the session_id is removed from the active session registry."
+          }
+        }
+      }
+    },
+    "/api/v1/products": {
+      "get": {
+        "operationId": "listProducts",
+        "summary": "Retrieve paginated product catalogue with filtering",
+        "description": "Returns the full product catalogue with support for keyword search, category filtering, and price range filtering. Each product record includes product_id, name, description, category, price, stock_quantity, and image_url. Accepts pagination parameters (page and page_size) to control result volume. Satisfies REQ-02: Product Catalogue Retrieval.",
+        "tags": ["Products"],
+        "parameters": [
+          {
+            "name": "keyword",
+            "in": "query",
+            "description": "Keyword-based text filter applied to product name and description",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "description": "Filter products by category name",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "min_price",
+            "in": "query",
+            "description": "Minimum price filter (inclusive)",
+            "schema": {"type": "number", "format": "float"}
+          },
+          {
+            "name": "max_price",
+            "in": "query",
+            "description": "Maximum price filter (inclusive)",
+            "schema": {"type": "number", "format": "float"}
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Pagination: page number (1-indexed)",
+            "schema": {"type": "integer", "default": 1}
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Pagination: number of records per page",
+            "schema": {"type": "integer", "default": 20}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of product records. Each record includes product_id, name, description, category, price, stock_quantity, and image_url.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "products": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "product_id": {"type": "string"},
+                          "name": {"type": "string"},
+                          "description": {"type": "string"},
+                          "category": {"type": "string"},
+                          "price": {"type": "number"},
+                          "stock_quantity": {"type": "integer"},
+                          "image_url": {"type": "string", "format": "uri"}
+                        }
+                      }
+                    },
+                    "total": {"type": "integer"},
+                    "page": {"type": "integer"},
+                    "page_size": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{product_id}": {
+      "get": {
+        "operationId": "getProduct",
+        "summary": "Retrieve a single product by ID",
+        "description": "Returns the full product record for a specific product_id, including product_id, name, description, category, price, stock_quantity, and image_url. Satisfies REQ-02: Product Catalogue Retrieval.",
+        "tags": ["Products"],
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "description": "Unique identifier of the product to retrieve",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full product record including product_id, name, description, category, price, stock_quantity, and image_url."
+          },
+          "404": {
+            "description": "Product not found"
+          }
+        }
+      }
+    },
+    "/api/v1/cart": {
+      "get": {
+        "operationId": "getCart",
+        "summary": "Retrieve current user's shopping cart",
+        "description": "Returns the authenticated user's persistent shopping cart state, including all cart items with their item_id, product_id, quantity, unit_price, and the server-computed subtotal. Cart state persists across user sessions. Satisfies REQ-03: Shopping Cart Management.",
+        "tags": ["Cart"],
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "Current cart state with all items (item_id, product_id, quantity, unit_price) and the computed subtotal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cart_id": {"type": "string"},
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "item_id": {"type": "string"},
+                          "product_id": {"type": "string"},
+                          "quantity": {"type": "integer"},
+                          "unit_price": {"type": "number"}
+                        }
+                      }
+                    },
+                    "subtotal": {"type": "number", "description": "Server-computed cart subtotal"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cart/items": {
+      "post": {
+        "operationId": "addCartItem",
+        "summary": "Add item to shopping cart",
+        "description": "Adds a product to the authenticated user's persistent shopping cart. Returns the updated cart state with the new item's item_id, product_id, quantity, unit_price, and the updated subtotal. Satisfies REQ-03: Shopping Cart Management.",
+        "tags": ["Cart"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["product_id", "quantity"],
+                "properties": {
+                  "product_id": {"type": "string"},
+                  "quantity": {"type": "integer", "minimum": 1}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Item added. Returns updated cart state with item_id, product_id, quantity, unit_price, and updated subtotal."
+          }
+        }
+      }
+    },
+    "/api/v1/cart/items/{item_id}": {
+      "put": {
+        "operationId": "updateCartItem",
+        "summary": "Update cart item quantity",
+        "description": "Updates the quantity of an existing item in the authenticated user's shopping cart. Returns the updated cart state with the revised quantity and recomputed subtotal. Satisfies REQ-03: Shopping Cart Management.",
+        "tags": ["Cart"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "description": "Unique cart item identifier",
+            "schema": {"type": "string"}
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["quantity"],
+                "properties": {
+                  "quantity": {"type": "integer", "minimum": 1}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated cart state with revised item quantity and recomputed subtotal."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeCartItem",
+        "summary": "Remove item from shopping cart",
+        "description": "Removes a specific item from the authenticated user's shopping cart. Returns the updated cart state with the item removed and the subtotal recomputed. Satisfies REQ-03: Shopping Cart Management.",
+        "tags": ["Cart"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "description": "Unique cart item identifier to remove",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Item removed. Returns updated cart state with the item removed and the subtotal recomputed."
+          }
+        }
+      }
+    },
+    "/api/v1/refund": {
+      "post": {
+        "operationId": "processRefund",
+        "summary": "Process a refund transaction with idempotent transaction_id",
+        "description": "Initiates a refund for a completed order. The client MUST provide a unique transaction_id in the request body to ensure idempotent processing — duplicate requests with the same transaction_id will return the original refund receipt rather than creating a duplicate refund. The transaction_id is included in the refund receipt response for end-to-end financial audit trail compliance. Satisfies REQ-04: Refund Transaction Integrity.",
+        "tags": ["Payments"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["order_id", "transaction_id", "refund_amount", "reason"],
+                "properties": {
+                  "order_id": {
+                    "type": "string",
+                    "description": "The order to refund"
+                  },
+                  "transaction_id": {
+                    "type": "string",
+                    "description": "Unique client-provided identifier for idempotent processing and financial audit compliance. Must be unique per refund attempt."
+                  },
+                  "refund_amount": {
+                    "type": "number",
+                    "description": "Amount to refund in the order's currency"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": ["defective_product", "wrong_item", "customer_changed_mind", "delivery_failure"],
+                    "description": "Reason for the refund"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Refund processed successfully. Returns the refund receipt including the client-provided transaction_id, confirming end-to-end audit traceability.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "refund_id": {"type": "string"},
+                    "transaction_id": {
+                      "type": "string",
+                      "description": "Echo of the client-provided transaction_id for audit trail verification"
+                    },
+                    "order_id": {"type": "string"},
+                    "refund_amount": {"type": "number"},
+                    "status": {"type": "string", "example": "processed"},
+                    "processed_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/checkout": {
+      "post": {
+        "operationId": "placeOrder",
+        "summary": "Submit checkout and place order",
+        "description": "Accepts a complete checkout payload including cart contents, shipping_address, delivery_method, and payment_method_token. Validates all fields and places the order, returning a unique order_id and estimated_delivery_date. Incomplete or invalid payloads are rejected with a structured validation error. High-value orders (total > $500) require prior 2FA verification (see REQ-09). Satisfies REQ-05: Checkout and Order Placement.",
+        "tags": ["Orders"],
+        "security": [{"BearerAuth": []}],
+        "x-requires-2fa": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["shipping_address", "delivery_method", "payment_method_token"],
+                "properties": {
+                  "shipping_address": {
+                    "type": "object",
+                    "description": "Validated shipping address object",
+                    "required": ["street", "city", "postal_code", "country"],
+                    "properties": {
+                      "street": {"type": "string"},
+                      "city": {"type": "string"},
+                      "postal_code": {"type": "string"},
+                      "country": {"type": "string"}
+                    }
+                  },
+                  "delivery_method": {
+                    "type": "string",
+                    "enum": ["standard", "express", "next_day"],
+                    "description": "Selected delivery method"
+                  },
+                  "payment_method_token": {
+                    "type": "string",
+                    "description": "Token representing the selected payment method"
+                  },
+                  "two_fa_token": {
+                    "type": "string",
+                    "description": "2FA verification token required for high-value orders (total > $500)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Order placed successfully. Returns order_id and estimated_delivery_date.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {"type": "string"},
+                    "estimated_delivery_date": {"type": "string", "format": "date"},
+                    "status": {"type": "string", "example": "confirmed"}
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Structured validation error response for incomplete or invalid payloads."
+          }
+        }
+      }
+    },
+    "/api/v1/payments/methods": {
+      "get": {
+        "operationId": "listPaymentMethods",
+        "summary": "List all supported and saved payment methods for the user",
+        "description": "Returns the authenticated user's available payment methods including credit/debit cards, digital wallet options (Apple Pay and Google Pay), and any saved payment instruments. Satisfies REQ-06: Payment Method Support.",
+        "tags": ["Payments"],
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "List of payment methods available to the user, including card_token options, Apple Pay, Google Pay, and saved_payment_id references."
+          }
+        }
+      }
+    },
+    "/api/v1/payments/process": {
+      "post": {
+        "operationId": "processPayment",
+        "summary": "Process payment using card, Apple Pay, Google Pay, or saved instrument",
+        "description": "Processes a payment transaction. Supports multiple payment types declared via the payment_type field: 'card' (using card_token), 'apple_pay' (using apple_pay_token), 'google_pay' (using google_pay_token), and 'saved' (using saved_payment_id). The payment_type must be explicitly declared in the request. Satisfies REQ-06: Payment Method Support.",
+        "tags": ["Payments"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["payment_type", "amount", "currency"],
+                "properties": {
+                  "payment_type": {
+                    "type": "string",
+                    "enum": ["card", "apple_pay", "google_pay", "saved"],
+                    "description": "Explicitly declared payment method type"
+                  },
+                  "card_token": {
+                    "type": "string",
+                    "description": "Card token — required when payment_type is 'card'"
+                  },
+                  "apple_pay_token": {
+                    "type": "string",
+                    "description": "Apple Pay payment token — required when payment_type is 'apple_pay'"
+                  },
+                  "google_pay_token": {
+                    "type": "string",
+                    "description": "Google Pay payment token — required when payment_type is 'google_pay'"
+                  },
+                  "saved_payment_id": {
+                    "type": "string",
+                    "description": "Stored payment instrument ID — required when payment_type is 'saved'"
+                  },
+                  "amount": {"type": "number"},
+                  "currency": {"type": "string", "example": "USD"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment processed successfully."
+          }
+        }
+      }
+    },
+    "/api/v1/orders/{order_id}/status": {
+      "get": {
+        "operationId": "getOrderStatus",
+        "summary": "Retrieve real-time order fulfilment status",
+        "description": "Returns the authenticated user's real-time order fulfilment status for the specified order_id. The response includes a status_label and an array of timeline_events, each containing a stage name (order_placed, processing, dispatched, out_for_delivery, delivered) and an ISO 8601 timestamp. Returns 403 Forbidden for orders not belonging to the authenticated user. Satisfies REQ-07: Order Status Tracking.",
+        "tags": ["Orders"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "description": "Unique order identifier",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order status with status_label and timeline_events array. Each timeline event has a stage name and ISO 8601 timestamp.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {"type": "string"},
+                    "status_label": {"type": "string"},
+                    "timeline_events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "stage": {
+                            "type": "string",
+                            "enum": ["order_placed", "processing", "dispatched", "out_for_delivery", "delivered"]
+                          },
+                          "timestamp": {"type": "string", "format": "date-time"}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — order does not belong to the authenticated user."
+          }
+        }
+      }
+    },
+    "/api/v1/orders/{order_id}/timeline": {
+      "get": {
+        "operationId": "getOrderTimeline",
+        "summary": "Retrieve full order fulfilment timeline with timestamps",
+        "description": "Returns the complete chronological fulfilment timeline for the specified order, listing every stage transition with its ISO 8601 timestamp. Supports REQ-07: Order Status Tracking by providing detailed stage-by-stage delivery progress including order_placed, processing, dispatched, out_for_delivery, and delivered events.",
+        "tags": ["Orders"],
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete order timeline with all stage timestamps."
+          },
+          "403": {
+            "description": "Forbidden — order does not belong to the authenticated user."
+          }
+        }
+      }
+    },
+    "/api/v1/users/profile": {
+      "get": {
+        "operationId": "getUserProfile",
+        "summary": "Retrieve authenticated user profile",
+        "description": "Returns the authenticated user's profile including display_name, email, shipping_addresses array, and notification_preferences. Satisfies REQ-08: User Profile Management.",
+        "tags": ["Users"],
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "User profile with display_name, email, shipping_addresses, and notification_preferences.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user_id": {"type": "string"},
+                    "display_name": {"type": "string"},
+                    "email": {"type": "string", "format": "email"},
+                    "shipping_addresses": {
+                      "type": "array",
+                      "items": {"type": "object"}
+                    },
+                    "notification_preferences": {"type": "object"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateUserProfile",
+        "summary": "Update user profile information",
+        "description": "Updates the authenticated user's profile fields including display_name, email, shipping_addresses, and notification_preferences. If email is changed, the response sets email_verification_pending to true, indicating a re-verification workflow has been triggered. Satisfies REQ-08: User Profile Management.",
+        "tags": ["Users"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "display_name": {"type": "string"},
+                  "email": {"type": "string", "format": "email"},
+                  "shipping_addresses": {"type": "array", "items": {"type": "object"}},
+                  "notification_preferences": {"type": "object"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated. If email was changed, email_verification_pending is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "display_name": {"type": "string"},
+                    "email": {"type": "string"},
+                    "email_verification_pending": {
+                      "type": "boolean",
+                      "description": "True if email was changed and re-verification is required"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/2fa/challenge": {
+      "post": {
+        "operationId": "issue2faChallenge",
+        "summary": "Issue a 2FA OTP challenge for high-value operations",
+        "description": "Issues a time-limited One-Time Password (OTP) challenge for Two-Factor Authentication enforcement. Must be called before high-value operations: orders with total value exceeding $500 or first-time registration of a new payment method. The OTP is delivered to the user's registered device. Satisfies REQ-09: Two-Factor Authentication Enforcement.",
+        "tags": ["Authentication"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["operation_type"],
+                "properties": {
+                  "operation_type": {
+                    "type": "string",
+                    "enum": ["high_value_order", "payment_method_registration"],
+                    "description": "The high-value operation requiring 2FA verification"
+                  },
+                  "operation_amount": {
+                    "type": "number",
+                    "description": "Order amount in USD — required for high_value_order to validate threshold"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "2FA challenge issued. Returns a challenge_token that must be submitted alongside the primary operation request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "challenge_token": {"type": "string"},
+                    "expires_in": {"type": "integer", "description": "OTP validity in seconds"},
+                    "delivery_method": {"type": "string", "enum": ["sms", "email", "authenticator_app"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/2fa/verify": {
+      "post": {
+        "operationId": "verify2faCode",
+        "summary": "Verify 2FA OTP code and authorise high-value operation",
+        "description": "Validates the user's submitted OTP code against the issued 2FA challenge. Upon successful verification, returns a two_fa_token authorising the pending high-value operation. This token must be submitted with the primary operation (e.g., checkout for orders > $500 or new payment method registration). Satisfies REQ-09: Two-Factor Authentication Enforcement.",
+        "tags": ["Authentication"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["challenge_token", "otp_code"],
+                "properties": {
+                  "challenge_token": {
+                    "type": "string",
+                    "description": "The challenge token returned by the 2FA challenge endpoint"
+                  },
+                  "otp_code": {
+                    "type": "string",
+                    "description": "The OTP code provided by the user"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "2FA verified successfully. Returns two_fa_token authorising the high-value operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "two_fa_token": {
+                      "type": "string",
+                      "description": "Short-lived authorisation token to submit with the primary high-value operation"
+                    },
+                    "valid_for_operation": {"type": "string"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or expired OTP code"
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/preferences": {
+      "get": {
+        "operationId": "getNotificationPreferences",
+        "summary": "Retrieve user notification subscription preferences",
+        "description": "Returns the authenticated user's current notification subscription state for all categories: order_updates, promotional_offers, and security_alerts. Satisfies REQ-10: Notification Subscription Management.",
+        "tags": ["Notifications"],
+        "security": [{"BearerAuth": []}],
+        "responses": {
+          "200": {
+            "description": "Current notification preferences for order_updates, promotional_offers, and security_alerts categories.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user_id": {"type": "string"},
+                    "preferences": {
+                      "type": "object",
+                      "properties": {
+                        "order_updates": {"type": "boolean"},
+                        "promotional_offers": {"type": "boolean"},
+                        "security_alerts": {"type": "boolean"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateNotificationPreferences",
+        "summary": "Update user notification subscription preferences",
+        "description": "Updates the authenticated user's notification preferences for any combination of categories: order_updates, promotional_offers, and security_alerts. Preference changes are persisted immediately and honoured by all downstream messaging services. The response confirms the updated preference state for each category. Satisfies REQ-10: Notification Subscription Management.",
+        "tags": ["Notifications"],
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "order_updates": {"type": "boolean"},
+                  "promotional_offers": {"type": "boolean"},
+                  "security_alerts": {"type": "boolean"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preferences updated. Confirms updated subscription state for order_updates, promotional_offers, and security_alerts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "preferences": {
+                      "type": "object",
+                      "properties": {
+                        "order_updates": {"type": "boolean"},
+                        "promotional_offers": {"type": "boolean"},
+                        "security_alerts": {"type": "boolean"}
+                      }
+                    },
+                    "updated_at": {"type": "string", "format": "date-time"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  }
+}

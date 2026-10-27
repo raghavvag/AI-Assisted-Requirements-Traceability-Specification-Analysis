@@ -70,6 +70,8 @@ def render_markdown(result: "ReviewResult", now: Optional[datetime] = None) -> s
                 "|---|---|",
                 f"| **Requirement** | `{v.requirement_id}` |",
             ]
+            if v.requirement_source:
+                lines.append(f"| **Defined in** | {v.requirement_source} |")
             if v.is_code:
                 lines += [
                     f"| **Code symbol** | `{v.endpoint_id.split('::')[-1]}` ({v.kind}, {v.change_status}) |",

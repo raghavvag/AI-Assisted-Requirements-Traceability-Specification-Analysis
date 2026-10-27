@@ -1,0 +1,43 @@
+{
+  "Figure 1": {
+    "diagram_type": "architecture",
+    "summary": "The figure models the system context for the Nexus Store, illustrating the interactions between the shopper, the Nexus Store API, and the payment gateway. It shows how these components communicate within the system.",
+    "requirements": []
+  },
+  "Figure 2": {
+    "diagram_type": "activity",
+    "summary": "The diagram models the process for enforcing two-factor authentication during high-value operations. It outlines the steps for verifying a one-time password (OTP) before authorizing the operation.",
+    "requirements": [
+      {
+        "id": "REQ-09",
+        "title": "Two-Factor Authentication Enforcement",
+        "statement": "The system shall issue a time-limited OTP that expires in 5 minutes when the order total is greater than $500 or a new payment method is registered."
+      },
+      {
+        "id": "REQ-09",
+        "title": "OTP Code Entry",
+        "statement": "The system shall require the customer to enter the OTP code."
+      },
+      {
+        "id": "REQ-09",
+        "title": "Validate OTP Code",
+        "statement": "The system shall validate the submitted OTP code."
+      },
+      {
+        "id": "REQ-09",
+        "title": "Reject Operation",
+        "statement": "The system shall reject the operation with HTTP 403 if the OTP code is invalid."
+      },
+      {
+        "id": "REQ-09",
+        "title": "Authorize Operation",
+        "statement": "The system shall authorize the operation by posting to /api/v1/checkout with the verified two_fa_token."
+      },
+      {
+        "id": "REQ-09",
+        "title": "Two-Factor Authentication Requirement",
+        "statement": "The system must verify 2FA before the high-value operation is authorized."
+      }
+    ]
+  }
+}

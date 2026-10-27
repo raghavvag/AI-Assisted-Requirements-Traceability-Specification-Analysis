@@ -3,7 +3,7 @@
 These are things only you can do: they need your accounts, your machine, a human check, or a decision.
 The task list (what gets built) is in [`docs/leftover.txt`](docs/leftover.txt). This file lists what *you* need to do.
 
-**Last updated:** 2026-10-16, M3 T3.5–T3.9 done (live review flow).
+**Last updated:** 2026-10-21, diagram-aware SRS parsing + end-to-end lifecycle test (section G).
 **How to use it:** tick a box when it's done. Items are in the order you should do them. A ⚠️ means it blocks later work.
 
 ---
@@ -168,6 +168,24 @@ Details: `docs/github-app-setup.md` §8.
 - [ ] uvicorn now loads two models (mpnet + jina, ~1.3 GB RAM together).
 - [ ] Optional: T5.5 evaluation (`data/ground_truth/code_labels.csv`, P/R/F1 per acceptance criterion) for the report.
 - [ ] Stop the old smee-client that still targets `localhost` (it silently drops events; the `127.0.0.1` one works).
+
+## G. Diagram-aware SRS parsing + E2E test (2026-10-21): not committed yet
+Figures in the SRS (UML, flowcharts, architecture) are now read (`src/srs/diagrams.py`, `docs/srs-format-guide.md` §2.4).
+Default mode is `local` (alt text + OCR, offline); the vision model is opt-in.
+- [ ] Commit: `src/srs/` (diagrams.py + readers), `src/review/`, `src/config.py`, `backend/app/{schemas.py,services/srs_ingest.py}`,
+      `frontend/src/components/SrsPreview.jsx`, `scripts/e2e_system_test.py`, `tests/` (test_srs_diagrams.py,
+      test_e2e_lifecycle.py, fakes.py, conftest.py, fixtures/e2e/), requirements files, `.env.example` files,
+      `docs/project_overview.md`, `docs/srs-format-guide.md`, `docs/leftover.txt`, this file.
+- [ ] To read diagrams with the vision model, add `SRS_DIAGRAM_MODE=vision` to `.env` (root) and restart uvicorn.
+      It uses your existing `OPENAI_API_KEY` (gpt-4o-mini; one call per new figure, cached in `~/.cache/traceability/diagrams`).
+      For the demo repo, `srs_extraction: { diagram_mode: vision }` in its `.traceability.yml` does the same for the bot.
+- [ ] Optional, offline OCR: install Tesseract (UB Mannheim Windows build, ~50 MB on C:, which is nearly full),
+      then set `TESSERACT_CMD` if it is not on PATH. `pip install -r requirements.txt` adds `pytesseract`.
+- [ ] Click-through: upload `Nexus_Store_SRS_v3.docx` (run `python scripts/e2e_system_test.py --keep out/e2e` to
+      generate it) and check the "Read N diagrams" panel and the `diagram` badge on REQ-09 in the SRS preview.
+- [ ] Re-run the E2E after big changes: `python scripts/e2e_system_test.py` (offline) or
+      `--live-vision --live-llm` (real models, ~2 min). Refresh the recording with `--live-vision --record`
+      only if you change the diagram or the vision prompt (PROMPT_VERSION).
 
 ---
 

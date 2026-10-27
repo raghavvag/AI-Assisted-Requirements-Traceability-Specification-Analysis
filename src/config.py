@@ -42,7 +42,7 @@ import os
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Literal, Mapping, Optional, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError, field_validator, model_validator
@@ -106,6 +106,9 @@ class SrsExtractionConfig(_Strict):
     id_pattern: Optional[str] = Field(None, description="Regex for one requirement ID; null = built-in")
     include_nfr: bool = True
     extra_blocklist: List[str] = Field(default_factory=list)
+    diagram_mode: Optional[Literal["off", "local", "vision"]] = Field(
+        None, description="How figures are read; null = $SRS_DIAGRAM_MODE, else local")
+    max_figures: int = Field(40, ge=0, le=500)
 
     @field_validator("id_pattern")
     @classmethod
@@ -122,7 +125,8 @@ class SrsExtractionConfig(_Strict):
 
     def to_options(self) -> ExtractionOptions:
         return ExtractionOptions(id_pattern=self.id_pattern, include_nfr=self.include_nfr,
-                                 extra_blocklist=tuple(self.extra_blocklist))
+                                 extra_blocklist=tuple(self.extra_blocklist),
+                                 diagram_mode=self.diagram_mode, max_figures=self.max_figures)
 
 
 class CodeConfig(_Strict):

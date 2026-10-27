@@ -55,6 +55,21 @@ MODIFIED = "modified"
 _SEVERITY_ORDER = {"No Drift": 0, "Stable": 1, "Minor Drift": 2, "Major Drift": 3, "Critical Drift": 4}
 
 
+def requirement_source(req: Dict[str, Any]) -> str:
+    """Where a requirement read from an SRS figure is written, so a reviewer can
+    find it ("" for requirements written as text)."""
+    if req.get("strategy") != "diagram":
+        return ""
+    fig = (req.get("figures") or [{}])[0]
+    kind = str(fig.get("diagram_type") or "").replace("_", " ")
+    parts = [f'SRS {fig.get("caption") or fig.get("figure") or "figure"}']
+    if kind and kind != "other":
+        parts.append(f"{kind} diagram")
+    if fig.get("engine"):
+        parts.append(f"read by {fig['engine']}")
+    return " · ".join(parts)
+
+
 class Verdict(str, Enum):
     PASS = "PASS"
     WARN = "WARN"
@@ -134,6 +149,7 @@ class Violation:
     explanation: str = ""
     kind: str = "endpoint"           # endpoint | function | class
     location: str = ""               # "app/refunds.py:12" for a code symbol
+    requirement_source: str = ""     # set when the requirement was read from an SRS figure
 
     @property
     def is_code(self) -> bool:
@@ -154,6 +170,7 @@ class Violation:
             "severity": self.severity,
             "endpoint_change_description": self.change_description,
             "explanation": self.explanation,
+            "requirement_source": self.requirement_source,
         }
 
 
@@ -408,6 +425,7 @@ def review_endpoint_changes(
                     change_description=change.change_description,
                     kind=change.kind,
                     location=change.location,
+                    requirement_source=requirement_source(req),
                 ))
                 regressed_ids.add(change.endpoint_id)
 

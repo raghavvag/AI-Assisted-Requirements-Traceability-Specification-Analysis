@@ -400,6 +400,24 @@ M5  CODE-AWARE EXPANSION  (OPTIONAL PHASE 2, ~5+ days)   [§6]
           T5.5 (code_labels.csv + F1 evaluation). tests/test_code_alignment.py (33) + 3 bot tests.)
 
 ======================================================================
+M5+ DIAGRAM-AWARE SRS PARSING + END-TO-END TEST  (2026-10-21)
+======================================================================
+[x] T5.7  Figures as first-class SRS content: Figure block in the IR; docx reader emits pictures
+          (DrawingML + VML, alt text), pdf reader renders raster images; captions paired; figures
+          in blocklisted sections dropped before reading. src/srs/diagrams.py: modes off / local
+          (alt text + Tesseract OCR) / vision (OpenAI gpt-4o-mini, JSON, temperature 0, on-disk
+          cache for deterministic re-parsing); DiagramStrategy (tagged -> ID, known ID -> context,
+          untagged behavioural -> FIG-n.k, structural diagrams -> context only). Report `figures`,
+          requirement `figures`, PR comment "Defined in: SRS Figure N". .traceability.yml
+          srs_extraction.diagram_mode / max_figures; SRS_DIAGRAM_MODE env. tests/test_srs_diagrams.py (30).
+          (2026-10-21)
+[x] T5.8  scripts/e2e_system_test.py + tests/test_e2e_lifecycle.py: IEEE SRS .docx with REQ-09 only
+          as a UML activity diagram -> upload API -> analyze/matrix/drift/benchmark -> 4 signed
+          webhooks through ReviewFlow (PASS / BLOCK REQ-09 / BLOCK REQ-04 / WARN). 24/24 checks with
+          the live vision model + live LLM; offline replay of the recorded answer under pytest.
+          docs/project_overview.md written. Full suite: 482 passed. (2026-10-21)
+
+======================================================================
 M6  EVALUATION, DOCUMENTATION, SUBMISSION  (~2-3 days)   [§7]
 ======================================================================
 [ ] T6.1  Extraction accuracy table: P/R of extracted requirements per fixture and for the 2 or
@@ -425,7 +443,7 @@ M6  EVALUATION, DOCUMENTATION, SUBMISSION  (~2-3 days)   [§7]
 ======================================================================
 OUT OF SCOPE / LATER
 ======================================================================
-- OCR for scanned PDFs (Tesseract)
+- OCR for whole scanned PDFs (figures inside a document ARE read since T5.7)
 - Legacy .doc / .docm, ReqIF and DOORS exports
 - JiraContextSource (roadmap Phase C)
 - AST sources for languages other than Python

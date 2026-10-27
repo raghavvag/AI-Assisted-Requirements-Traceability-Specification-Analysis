@@ -17,7 +17,7 @@ parser ("{title}. {description}") so scores stay comparable across formats.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from src.srs.noise import clean_text
 from src.srs.options import ExtractionOptions
@@ -173,9 +173,12 @@ def finalize(
     source_format: str,
     options: ExtractionOptions,
     report: ExtractionReport,
+    figure_refs: Optional[Mapping[str, List[Dict[str, Any]]]] = None,
 ) -> List[Dict[str, object]]:
     """Resolve duplicates (strategy priority, then document order), build the
-    output dicts, apply `include_nfr`, return them in document order."""
+    output dicts, apply `include_nfr`, return them in document order.
+    `figure_refs` (canonical ID -> figures) adds a `figures` key to the
+    requirements a diagram produced or illustrates; it is never embedded."""
     winners: Dict[str, Candidate] = {}
     for cand in sorted(candidates, key=lambda c: (STRATEGY_PRIORITY.get(c.strategy, 9), c.position)):
         cid = canonical_id(cand.raw_id)
@@ -201,6 +204,8 @@ def finalize(
         if not options.include_nfr and req["type"] == NON_FUNCTIONAL:
             dropped_nfr += 1
             continue
+        if figure_refs and figure_refs.get(req["id"]):
+            req["figures"] = [dict(f) for f in figure_refs[req["id"]]]
         out.append(req)
     report.skip("non_functional_excluded", dropped_nfr)
     return out

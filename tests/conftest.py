@@ -27,6 +27,10 @@ if str(BACKEND) not in sys.path:
 TEST_TMP = Path(tempfile.mkdtemp(prefix="trace_tests_"))
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{(TEST_TMP / 'test.db').as_posix()}"
 os.environ["UPLOAD_DIR"] = str(TEST_TMP / "uploads")
+# Figures are read offline in tests (alt text / OCR) unless a test opts into a
+# fake vision client; a developer's .env must never make the suite call an API.
+os.environ["SRS_DIAGRAM_MODE"] = "local"
+os.environ["SRS_DIAGRAM_CACHE_DIR"] = str(TEST_TMP / "diagram_cache")
 
 
 @pytest.fixture(scope="session")
@@ -36,3 +40,13 @@ def semantic_embedder():
     from src.embedder import SemanticEmbedder
 
     return SemanticEmbedder()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_vision_model(monkeypatch):
+    """No test may reach a real vision API: tests that want one install
+    tests.fakes.FakeVisionClient through diagrams.vision_client_factory."""
+    from src.srs import diagrams
+
+    monkeypatch.setenv("SRS_DIAGRAM_MODE", "local")
+    monkeypatch.setattr(diagrams, "vision_client_factory", lambda: None)

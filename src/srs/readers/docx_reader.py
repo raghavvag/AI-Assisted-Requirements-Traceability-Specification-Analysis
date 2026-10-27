@@ -17,9 +17,13 @@ Industrial SRS edge cases handled here:
     are joined with "\\n"; header rows marked "repeat as header" are counted;
     1-column tables (callout boxes, layout wrappers) are unwrapped into their
     content; nested tables are emitted after their parent.
-  * Never read: images, shapes, text boxes, headers/footers, comments,
-    footnotes. The body walk does not visit them, so most visual noise is
-    removed for free.
+  * Pictures (DrawingML w:drawing and legacy VML w:pict) are emitted as
+    Figure blocks with their bytes and accessibility alt text, in document
+    order after the paragraph that anchors them; src/srs/diagrams.py reads
+    the requirements they show. Linked (not embedded) pictures, charts and
+    pictures inside multi-column table cells are not read.
+  * Never read: shapes, text boxes, headers/footers, comments, footnotes. The
+    body walk does not visit them, so most visual noise is removed for free.
 """
 
 from __future__ import annotations
@@ -40,7 +44,7 @@ from docx.table import _Cell
 from docx.text.paragraph import Paragraph as DocxParagraph
 from lxml import etree
 
-from src.srs.blocks import Block, BlockKind, Heading, LocatorFactory, Paragraph, Row, Table
+from src.srs.blocks import Block, BlockKind, Figure, Heading, LocatorFactory, Paragraph, Row, Table
 from src.srs.errors import InvalidDocumentError, UnsupportedFormatError
 from src.srs.noise import clean_text
 from src.srs.report import ExtractionReport
@@ -52,6 +56,10 @@ DEFAULT_MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 _NS = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
     "mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+    "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
+    "v": "urn:schemas-microsoft-com:vml",
 }
 
 # Visible text of a paragraph in document order. Excludes deleted / moved-away
@@ -67,6 +75,15 @@ _TEXT_NODES = etree.XPath(
     namespaces=_NS,
 )
 _HAS_GRAPHIC = etree.XPath("./descendant::w:drawing | ./descendant::w:pict", namespaces=_NS)
+# Graphics outside mc:Fallback (which duplicates the mc:Choice content).
+_GRAPHICS = etree.XPath("./descendant::w:drawing[not(ancestor::mc:Fallback)]"
+                        " | ./descendant::w:pict[not(ancestor::mc:Fallback)]", namespaces=_NS)
+_BLIP_IDS = etree.XPath("./descendant::a:blip/@r:embed | ./descendant::v:imagedata/@r:id", namespaces=_NS)
+_DOC_PR = etree.XPath("./descendant::wp:docPr", namespaces=_NS)
+_VML_ALT = etree.XPath("./descendant::v:shape/@alt", namespaces=_NS)
+# Word's auto-generated alt text ends with this; it carries no extra meaning.
+_AUTO_ALT = re.compile(r"\s*(?:AI-generated content may be incorrect\.?|Description automatically generated"
+                       r"(?: with (?:low|medium|high) confidence)?\.?)\s*$", re.IGNORECASE)
 _OUTLINE_LVL = etree.XPath("./w:pPr/w:outlineLvl/@w:val", namespaces=_NS)
 _NUM_PR = etree.XPath("./w:pPr/w:numPr", namespaces=_NS)
 _TBL_HEADER = etree.XPath("./w:trPr/w:tblHeader", namespaces=_NS)
@@ -194,6 +211,7 @@ class _DocxWalker:
                 block = self._paragraph(item)
                 if block is not None:
                     yield block
+                yield from self._figures(item)
             else:
                 yield from self._table(item)
 
@@ -203,7 +221,8 @@ class _DocxWalker:
         raw = paragraph_text(par._p)
         text = clean_text(raw)
         if not text:
-            self.report.skip("image" if _HAS_GRAPHIC(par._p) else "empty")
+            if not _HAS_GRAPHIC(par._p):
+                self.report.skip("empty")
             return None
 
         style_name = _style_name(par)
@@ -216,6 +235,23 @@ class _DocxWalker:
             style=style_name,
             is_list=_is_list(par, style_name),
         )
+
+    # -- figures ------------------------------------------------------------
+
+    def _figures(self, par: DocxParagraph) -> Iterator[Figure]:
+        """One Figure per embedded picture anchored in this paragraph."""
+        for graphic in _GRAPHICS(par._p):
+            ids = _BLIP_IDS(graphic)
+            part = _related_part(par, ids[0]) if ids else None
+            if part is None:                    # shape, chart, SmartArt or linked picture
+                self.report.skip("image")
+                continue
+            yield Figure(
+                locator=self.locators.next(BlockKind.FIGURE),
+                image=part.blob,
+                content_type=getattr(part, "content_type", "") or "",
+                alt_text=_alt_text(graphic),
+            )
 
     # -- tables -------------------------------------------------------------
 
@@ -305,6 +341,24 @@ def paragraph_text(p_element: etree._Element) -> str:
         elif tag == _W_NBH:
             parts.append("-")
     return "".join(parts)
+
+
+def _related_part(par: DocxParagraph, rel_id: str):
+    try:
+        part = par.part.related_parts[rel_id]
+    except (KeyError, AttributeError):
+        return None
+    return part if getattr(part, "blob", None) else None
+
+
+def _alt_text(graphic: etree._Element) -> str:
+    """Accessibility text of a picture: wp:docPr title + description (VML: @alt)."""
+    parts: List[str] = []
+    for pr in _DOC_PR(graphic)[:1]:
+        parts += [pr.get("title") or "", pr.get("descr") or ""]
+    parts += list(_VML_ALT(graphic))[:1]
+    text = clean_text(" ".join(p for p in parts if p))
+    return _AUTO_ALT.sub("", text).strip()
 
 
 def _unique_cells(row) -> List[_Cell]:

@@ -77,6 +77,31 @@ This method is used only when methods 1 and 2 find nothing:
 - These requirements get **generated IDs** (`SRS-AUTO-001`, …), and the preview shows a warning.
 - Add real IDs to the SRS for traceability that stays stable between versions.
 
+### 2.4 Figures and diagrams
+
+UML diagrams, flowcharts and architecture figures are read as well (`src/srs/diagrams.py`). Each embedded picture in a `.docx`, and each raster image in a PDF, goes through one of three modes:
+
+| Mode (`SRS_DIAGRAM_MODE` or `srs_extraction.diagram_mode`) | How figures are read | Network |
+|---|---|---|
+| `off` | Figures are ignored | no |
+| `local` (default) | The picture's **alt text** (Word accessibility text), plus **OCR** when the Tesseract binary is installed (`TESSERACT_CMD` if it is not on `PATH`) | no |
+| `vision` | A **vision LLM** (`SRS_VISION_MODEL`, default `gpt-4o-mini`, uses `OPENAI_API_KEY`) reads the diagram and writes each behaviour it shows as a "The system shall…" statement. It falls back to `local` if the call fails | yes |
+
+How a reading becomes requirements:
+- **The figure or caption shows an ID** ("Figure 2: REQ-09 …", or `FR-3` inside the drawing). If that ID is new, it becomes a requirement with that ID (strategy `diagram`); several statements with the same ID are merged into one. If the ID is already in the text, the figure is attached to that requirement as context (`figures`), and the text version is kept unchanged.
+- **No ID, and the figure sits under a tagged requirement heading** (`REQ-07 Order tracking`). The figure illustrates that requirement and adds no new one.
+- **No ID, behavioural diagram** (use case, activity, sequence, state, flowchart). Each statement becomes `FIG-<caption number>.<n>`, with `id_source: "generated"` and a warning.
+- **No ID, structural diagram** (architecture, context, component, deployment, class, ER, chart, UI mock-up). The statements are kept as context only, because boxes and arrows describe the design, not the behaviour.
+- Plain labels ("Customer", "Payment Gateway") are context only.
+
+The `figures` list in the extraction report says, for each figure, its caption, type, engine, summary, the requirements it created and the ones it illustrates. The PR bot names the figure ("Defined in: SRS Figure 2 · activity diagram") when a diagram requirement regresses.
+
+Safeguards:
+- **Deterministic.** Vision readings are cached per image, model, prompt version, caption and alt text (`SRS_DIAGRAM_CACHE_DIR`, default `~/.cache/traceability/diagrams`). So the upload preview, the analysis and the PR bot always see the same requirements.
+- **Cost.** Figures in blocklisted sections (appendix, glossary, …) are dropped before reading. Icons and images under about 120×120 px (or 1 inch in a PDF) are skipped. At most `max_figures` (default 40) are read per document.
+- **No invented IDs.** An ID the model returns must match the document's ID pattern, or it is discarded.
+- **Tip for authors.** Put the requirement ID in the caption ("Figure 4: FR-12 Order state machine"), or write the rule into the picture's alt text, so the figure gets a stable ID even without a vision model.
+
 ## 3. What is removed
 
 | Removed | How it is recognised |
@@ -84,7 +109,7 @@ This method is used only when methods 1 and 2 find nothing:
 | Cover page, revision history, document control | Not tagged, or the section heading is on the boilerplate list |
 | Table of contents | Word's TOC field, `TOC` paragraph styles, dot-leader lines |
 | Definitions, acronyms, glossary, references, appendices, index, approvals and sign-off | Section heading. The whole section is skipped. |
-| Images, shapes, text boxes | Never read |
+| Shapes and text boxes | Never read. Pictures are read as figures, see §2.4 |
 | Headers and footers (Word) | Never read |
 | Running headers, footers and page numbers (PDF) | Lines repeated in the top or bottom 8% of the page |
 | Captions ("Figure 1: …", "Table 2 – …") | Caption style or caption pattern |

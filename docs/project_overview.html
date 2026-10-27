@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>project_overview.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> or <div class="page"></div> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="ai-assisted-requirements-traceability--specification-analysis--project-overview">AI-Assisted Requirements Traceability &amp; Specification Analysis — Project Overview</h1>
+<blockquote>
+<p><strong>What this document is:</strong> one place that explains the product: the pitch, every feature from the
+user's side, and the exact path a user takes through the website and through GitHub.
+<strong>Last updated:</strong> 2026-10-21 · all features below are built and covered by automated tests.</p>
+</blockquote>
+<p><strong>Contents</strong></p>
+<ol>
+<li><a href="#section-1-the-perfect-pitch">The Perfect Pitch</a></li>
+<li><a href="#section-2-functional-features-users-perspective">Functional Features (User's Perspective)</a></li>
+<li><a href="#section-3-website-flow--user-journey">Website Flow &amp; User Journey</a></li>
+</ol>
+<hr>
+<h2 id="section-1-the-perfect-pitch">Section 1: The Perfect Pitch</h2>
+<h3 id="the-hook">The hook</h3>
+<blockquote>
+<p>A developer opens a small pull request called <em>&quot;frictionless checkout&quot;</em>. It removes one field from
+the checkout API. Every test passes, so it gets merged. Six months later an auditor finds that orders
+over $500 no longer need two-factor authentication, and the company has a security incident.</p>
+<p>Nothing in the code was &quot;broken&quot;. What broke was the <strong>meaning</strong>: the API stopped doing what the
+requirements document asked for. The rule was not even written as a sentence. It was a <strong>UML diagram
+on page 7 of the SRS</strong>, so nobody checked it.</p>
+<p><strong>Our bot would have blocked that pull request, and its comment would have pointed to that diagram.</strong></p>
+</blockquote>
+<h3 id="the-problem-specification-drift">The problem: specification drift</h3>
+<p>Software is described twice, by two different groups of people:</p>
+<table>
+<thead>
+<tr>
+<th>Who</th>
+<th>Writes</th>
+<th>In what language</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Business analysts, product owners</td>
+<td>The <strong>SRS</strong> (Software Requirements Specification)</td>
+<td>Plain English, tables and <strong>diagrams</strong> in Word or PDF</td>
+</tr>
+<tr>
+<td>Developers</td>
+<td>The <strong>API specification</strong> (OpenAPI) and the code</td>
+<td>Technical JSON/YAML and Python</td>
+</tr>
+</tbody>
+</table>
+<p>Over many releases the two drift apart. We call this <strong>specification drift</strong>. It is dangerous because:</p>
+<ul>
+<li><strong>It is silent.</strong> No test fails and no linter complains.</li>
+<li><strong>It adds up.</strong> Many small &quot;clean-ups&quot; become one large compliance failure.</li>
+<li><strong>The words differ.</strong> &quot;Unique transaction id&quot;, &quot;idempotency key&quot; and &quot;audit reference&quot; can mean the
+same thing, so keyword search cannot connect them.</li>
+<li><strong>Requirements hide in pictures.</strong> Real SRS documents put many rules in UML activity, sequence and
+use-case diagrams, and normal tools never read those.</li>
+<li><strong>It is expensive.</strong> In banking, healthcare and e-commerce, undetected drift leads to failed audits and fines.</li>
+</ul>
+<p>Existing tools do not solve this:</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>What it checks</th>
+<th>What it misses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Jira / DOORS trace links</td>
+<td>That someone typed a link</td>
+<td>Whether the code really does what the link claims</td>
+</tr>
+<tr>
+<td>API linters (Spectral)</td>
+<td>That the file is well formed</td>
+<td>Whether it matches the business rule</td>
+</tr>
+<tr>
+<td>Keyword / TF-IDF search</td>
+<td>Matching words</td>
+<td>The same meaning in different words</td>
+</tr>
+<tr>
+<td>Manual review</td>
+<td>Everything, slowly</td>
+<td>Does not scale to hundreds of endpoints and requirements</td>
+</tr>
+</tbody>
+</table>
+<h3 id="who-it-is-for">Who it is for</h3>
+<table>
+<thead>
+<tr>
+<th>Audience</th>
+<th>What they get</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Developers</strong></td>
+<td>A review on every pull request, <em>before</em> merge, that says which requirement a change breaks, why, and how to fix it</td>
+</tr>
+<tr>
+<td><strong>QA engineers / test leads</strong></td>
+<td>Proof that every requirement is covered by an endpoint before a release, and a list of the gaps</td>
+</tr>
+<tr>
+<td><strong>Project and product managers</strong></td>
+<td>One compliance score per project, a drift report between API versions, and evidence for audits</td>
+</tr>
+<tr>
+<td><strong>Architects and auditors</strong></td>
+<td>Reproducible, explainable numbers: the AI explains the result, it never decides it</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-solution">The solution</h3>
+<p>We teach a computer to <strong>compare meaning, not words</strong>.</p>
+<ol>
+<li><strong>Read the SRS like a person would.</strong> Upload a messy Word, PDF or Markdown SRS. The tool finds the
+requirements in tables, tagged headings and &quot;shall&quot; sentences, removes the boilerplate (cover page,
+revision history, table of contents, glossary, appendices), and <strong>reads the diagrams too</strong>: a vision
+model turns a UML diagram into requirement statements.</li>
+<li><strong>Read the API.</strong> Every OpenAPI endpoint becomes one text that includes its fields and descriptions.</li>
+<li><strong>Compare meaning.</strong> A transformer model (<code>all-mpnet-base-v2</code>) turns each requirement and each
+endpoint into a 768-number &quot;meaning fingerprint&quot;. Cosine similarity gives a score from 0 to 1 for
+every pair. Together these scores form the <strong>traceability matrix</strong>.</li>
+<li><strong>Watch every change.</strong> A GitHub App re-checks the matrix on every pull request and posts
+<strong>PASS</strong>, <strong>WARN</strong> or <strong>BLOCK</strong>, with a plain-English explanation.</li>
+</ol>
+<h3 id="high-level-features">High-level features</h3>
+<ul>
+<li><strong>Semantic traceability.</strong> Requirement-to-endpoint matching by meaning, shown as a coverage list, a
+heatmap and an interactive <strong>3D graph</strong>.</li>
+<li><strong>Industrial SRS ingestion.</strong> Word <code>.docx</code>, PDF and Markdown, with noise removal and an extraction
+report you can check before analysis.</li>
+<li><strong>Diagram-aware parsing (new).</strong> UML, flowcharts and architecture figures are read with a vision LLM,
+alt text or OCR. A requirement that exists only as a picture is still traced and protected.</li>
+<li><strong>Drift detection.</strong> Compare API v1 and v2 against the same requirements, with Minor, Major and
+Critical severity.</li>
+<li><strong>Plain-English explanations.</strong> An LLM writes <em>what changed, why it breaks the rule, how to fix it</em>.</li>
+<li><strong>GitHub integration.</strong> A real GitHub App with a check run, an always-current PR comment, merge
+blocking through branch protection, and the linked issue's acceptance criteria checked.</li>
+<li><strong>AST code scanning.</strong> When a pull request changes Python code, the changed functions and classes
+(found through the abstract syntax tree) are compared with the requirements, using a code-aware
+embedding model.</li>
+<li><strong>CI/CD gate.</strong> The same engine runs as a GitHub Action or a CLI with exit codes, with no server needed.</li>
+</ul>
+<h3 id="why-our-approach-is-right">Why our approach is right</h3>
+<ul>
+<li><strong>Meaning, not keywords.</strong> Our model scores <strong>F1 0.71 vs 0.34</strong> for the TF-IDF keyword baseline,
+and ranks the correct endpoint first for every requirement (<strong>MAP 1.00</strong>).</li>
+<li><strong>Explainable, not a black box.</strong> The score is plain maths, so anyone can reproduce it. The LLM only
+writes the explanation; it never sets a score or a verdict.</li>
+<li><strong>Diagrams are first-class.</strong> In our end-to-end test, REQ-09 (two-factor authentication) exists <strong>only</strong>
+as a UML activity diagram. The tool read it, traced it to the right endpoints (best match 0.85), found
+its drift in API v2, and blocked the pull request that removed 2FA. The comment named &quot;SRS Figure 2&quot; as
+the source.</li>
+<li><strong>Shift-left.</strong> Drift is caught in the pull request, not in an audit six months later.</li>
+</ul>
+<h3 id="proof-it-works">Proof it works</h3>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Automated tests</td>
+<td><strong>482 passing</strong> (unit, API, GitHub App, code-aware, diagram parsing, end-to-end)</td>
+</tr>
+<tr>
+<td>End-to-end lifecycle test (upload → analysis → 4 live PR reviews)</td>
+<td><strong>24 / 24 checks pass</strong> with the real vision model and real LLM</td>
+</tr>
+<tr>
+<td>Semantic model vs keyword baseline</td>
+<td>F1 <strong>0.71 vs 0.34</strong>, MAP <strong>1.00</strong></td>
+</tr>
+<tr>
+<td>Same SRS as <code>.docx</code>, <code>.pdf</code> and <code>.md</code></td>
+<td>Identical requirements and identical scores (parity test)</td>
+</tr>
+<tr>
+<td>PR bot on the demo pull requests</td>
+<td>PASS on the safe change, BLOCK on both breaking changes, WARN on the partly delivered issue</td>
+</tr>
+</tbody>
+</table>
+<h3 id="one-line-summary">One-line summary</h3>
+<blockquote>
+<p><strong>We built an AI system that reads your requirements, including the diagrams, and your API and code,
+measures whether the software still means what the business asked for, explains every gap in plain
+English, and blocks the pull request before the drift is merged.</strong></p>
+</blockquote>
+<hr>
+<h2 id="section-2-functional-features-users-perspective">Section 2: Functional Features (User's Perspective)</h2>
+<p>Everything below is something a user can actually do today.</p>
+<h3 id="21-account-and-projects">2.1 Account and projects</h3>
+<ul>
+<li><strong>Sign in with Google.</strong> One click and no new password. The session is kept with secure tokens.</li>
+<li><strong>Create projects.</strong> Each product or API gets its own project with its own documents and results.
+Users only ever see their own projects.</li>
+<li><strong>Delete projects</strong> you no longer need.</li>
+</ul>
+<h3 id="22-uploading-documents">2.2 Uploading documents</h3>
+<ul>
+<li><strong>Upload a real, messy SRS.</strong> Word <code>.docx</code>, PDF (with a text layer), Markdown or plain text, up to 10 MB.
+The tool understands:
+<ul>
+<li>requirement <strong>tables</strong> (<code>ID | Title | Description | Priority</code>, one-card-per-requirement tables,
+tables without a header row, merged cells, tables that continue across pages);</li>
+<li><strong>tagged</strong> headings and paragraphs (<code>FR-1</code>, <code>REQ-04</code>, <code>[NFR-2]</code>, <code>BNK-REQ-01</code>, <code>3.2.1 FR-7 …</code>);</li>
+<li>plain <strong>&quot;The system shall…&quot;</strong> sentences, when a document has no IDs at all;</li>
+<li>Word details such as content controls, tracked changes (deleted text is ignored), callout boxes and
+nested tables.</li>
+</ul>
+</li>
+<li><strong>Diagrams are read, not thrown away.</strong> For every figure in the SRS (UML use-case, activity, sequence
+or state diagrams, flowcharts, architecture drawings):
+<ul>
+<li>a <strong>vision LLM</strong> reads the picture and writes the requirements it shows as &quot;The system shall…&quot;
+statements, keeping the names, limits, fields and endpoints from the drawing;</li>
+<li>if the figure or its caption shows a requirement ID (for example &quot;Figure 2: REQ-09 …&quot;), the
+requirement keeps that ID;</li>
+<li>a diagram that only <em>illustrates</em> a requirement already written in the text is attached to that
+requirement as context, so nothing is duplicated;</li>
+<li>architecture and context diagrams (boxes and arrows) are kept as context, not turned into vague
+requirements;</li>
+<li>figures in appendices, glossaries and other boilerplate sections are skipped and never sent to the model;</li>
+<li>without an API key, figures are read from their <strong>alt text</strong> or by <strong>OCR</strong> (Tesseract).</li>
+</ul>
+</li>
+<li><strong>Noise is removed automatically:</strong> cover page, revision history, table of contents, definitions and
+glossary, references, appendices, captions, page numbers, and running headers and footers.</li>
+<li><strong>Upload the API specs.</strong> OpenAPI v1 (the baseline) and, optionally, v2 (the new version), as JSON or YAML.</li>
+<li><strong>Clear errors instead of crashes.</strong> Wrong file type, a fake <code>.docx</code>, a macro-enabled document, an
+oversized file or a scanned PDF each get a specific message that says how to fix it.</li>
+</ul>
+<h3 id="23-reviewing-what-was-extracted-before-analysis">2.3 Reviewing what was extracted (before analysis)</h3>
+<ul>
+<li><strong>Requirement preview.</strong> Right after upload you see:
+<ul>
+<li>&quot;Extracted <strong>N</strong> requirements&quot;, with chips such as <em>6 from requirement tables · 3 from tagged
+headings · 1 read from diagrams</em>;</li>
+<li>the boilerplate sections that were removed, and the noise that was cleaned;</li>
+<li>a <strong>&quot;Read N diagrams&quot;</strong> panel with each figure's caption, its type (activity, sequence, …), a short
+summary, and which requirements it created or illustrates;</li>
+<li>every requirement, with a click to expand its text, location in the document (&quot;table 3 / row 5&quot;,
+&quot;figure 2&quot;), section, type and priority. Diagram requirements carry a <strong>diagram</strong> badge, and
+generated IDs carry a warning badge;</li>
+<li>warnings, such as a duplicate ID or a requirement too long for the model to read fully.</li>
+</ul>
+</li>
+<li><strong>Open the same preview at any time</strong> from the project page (&quot;Requirements extracted from the SRS&quot;).</li>
+</ul>
+<h3 id="24-traceability-analysis">2.4 Traceability analysis</h3>
+<ul>
+<li><strong>Run Analysis with one button.</strong> The tool parses, embeds and scores everything, and stores the result.</li>
+<li><strong>Headline numbers:</strong> requirements covered, overall compliance, endpoints analysed, strong matches.</li>
+<li><strong>Four views of the traceability matrix:</strong>
+<ul>
+<li><strong>Coverage:</strong> each requirement with its best endpoints and a compliance band (green, amber, red);</li>
+<li><strong>Graph:</strong> an interactive <strong>3D force graph</strong> of requirements linked to the endpoints that implement them;</li>
+<li><strong>Heatmap:</strong> the full requirement × endpoint similarity matrix;</li>
+<li><strong>Split:</strong> coverage and graph side by side.</li>
+</ul>
+</li>
+<li><strong>Click a requirement</strong> to see its matching endpoints and scores.</li>
+</ul>
+<h3 id="25-drift-analysis-api-v1--v2">2.5 Drift analysis (API v1 → v2)</h3>
+<ul>
+<li><strong>Compliance before and after</strong>, and which requirement–endpoint pairs lost alignment.</li>
+<li><strong>Severity for every drift:</strong> Minor, Major or Critical.</li>
+<li><strong>&quot;Explain&quot; button</strong> on any drift: an LLM writes three plain sentences:
+<ol>
+<li><em>What changed</em> in the API;</li>
+<li><em>Why it violates</em> the requirement;</li>
+<li><em>The remediation</em>: the exact change that restores compliance.
+Without an API key a structured template is shown instead; the tool never crashes.</li>
+</ol>
+</li>
+</ul>
+<h3 id="26-pr-bot">2.6 PR Bot</h3>
+<ul>
+<li><strong>Simulated tab:</strong> try the bot on built-in pull requests (an additive change, a refund change and a
+2FA removal) and see the verdict and the full review comment, without GitHub.</li>
+<li><strong>Live reviews tab:</strong> every real pull request the GitHub App reviewed, with repo, PR link, verdict
+badge and time. Open one to see the violations, the check run and the exact comment posted on GitHub.</li>
+<li><strong>On GitHub, for every pull request:</strong>
+<ul>
+<li>a <strong>&quot;Requirements Traceability&quot; check run</strong> with PASS, WARN or BLOCK, a summary table and the explanations;</li>
+<li><strong>one PR comment</strong> that is updated on every push (no comment spam), showing every violation with
+the requirement, the endpoint or code symbol, the score before and after, the drop, the severity,
+the <strong>source of the requirement</strong> (for example &quot;SRS Figure 2 · activity diagram&quot;), and the
+plain-English explanation;</li>
+<li>the <strong>linked issue</strong> (<code>Closes #12</code>) is read and its acceptance criteria are checked against what
+the PR actually adds;</li>
+<li><strong>merge blocking</strong> when the check is a required status check in branch protection;</li>
+<li>a <strong>Re-run</strong> button on the check.</li>
+</ul>
+</li>
+<li><strong>AST code scanning:</strong> if the repo's config lists code paths (<code>code: { paths: [&quot;app/**/*.py&quot;] }</code>), a
+PR that changes Python handlers but not the spec is still reviewed: each changed function or class
+is compared with the requirements, and the comment shows the symbol and its <code>file:line</code>.</li>
+</ul>
+<h3 id="27-benchmarks">2.7 Benchmarks</h3>
+<ul>
+<li><strong>Accuracy report:</strong> Precision, Recall, F1 and MAP of the semantic model against a TF-IDF keyword
+baseline, so the quality of the matching is measured, not assumed.</li>
+</ul>
+<h3 id="28-for-cicd-and-power-users">2.8 For CI/CD and power users</h3>
+<ul>
+<li><strong><code>.traceability.yml</code></strong> in the repo: SRS path, spec path(s), thresholds, <code>fail_on</code>
+(<code>block</code> / <code>critical</code> / <code>never</code>), SRS extraction options (custom ID pattern, diagram mode), and code paths.</li>
+<li><strong>GitHub Action</strong> (<code>action.yml</code>): the same review in any repository's workflow, with no server. The
+report is shown in the job summary.</li>
+<li><strong>CLI</strong> (<code>python -m src.cli</code>): <code>extract-srs</code>, <code>analyze</code>, <code>review</code>, with exit codes 0 (PASS/WARN), 1 (BLOCK), 2 (error).</li>
+</ul>
+<hr>
+<h2 id="section-3-website-flow--user-journey">Section 3: Website Flow &amp; User Journey</h2>
+<h3 id="31-the-journey-at-a-glance">3.1 The journey at a glance</h3>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart LR
+    A[Landing page] --> B[Sign in with Google]
+    B --> C[Dashboard: My Projects]
+    C --> D[New Project]
+    D --> E[Upload SRS + API v1 + API v2]
+    E --> F[Review extracted requirements<br/>incl. diagrams]
+    F --> G[Project: Traceability]
+    G --> H[Run Analysis]
+    H --> I[Coverage / 3D Graph / Heatmap]
+    I --> J[Drift Analysis + Explain]
+    I --> K[Benchmarks]
+    I --> L[PR Bot: Simulated / Live reviews]
+</div></code></pre>
+<h3 id="32-step-by-step-on-the-website">3.2 Step by step on the website</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Screen</th>
+<th>What the user does</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Landing page</strong> (<code>/</code>)</td>
+<td>Reads what the product does and clicks to sign in</td>
+<td>—</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Login</strong> (<code>/login</code>)</td>
+<td>Clicks <strong>Sign in with Google</strong> and picks an account</td>
+<td>Google confirms who they are; the backend issues a session token. A clear message appears if Google rejects the sign-in</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Dashboard: My Projects</strong> (<code>/dashboard</code>)</td>
+<td>Sees their projects, or &quot;No projects yet&quot;</td>
+<td>Only this user's projects are listed</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>New Project</strong></td>
+<td>Clicks <strong>New Project</strong>, types a name and description, clicks <strong>Create Project</strong></td>
+<td>An empty project card appears</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Upload</strong></td>
+<td>Clicks <strong>Upload</strong> on the card and drops in three files: the <strong>SRS</strong> (<code>.docx</code> / <code>.pdf</code> / <code>.md</code> / <code>.txt</code>), <strong>API v1</strong> and optionally <strong>API v2</strong> (<code>.json</code> / <code>.yaml</code>). Clicks <strong>Upload Files</strong></td>
+<td>Each file is checked (type, size, real content). The SRS is parsed immediately: tables, tags, shall-statements and <strong>diagrams</strong></td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Review extracted requirements</strong></td>
+<td>Reads the preview: the count, the strategy chips, the <strong>diagrams read</strong>, the removed boilerplate, the warnings and each requirement. Clicks <strong>Looks good</strong> (or <strong>Upload more files</strong> to fix something)</td>
+<td>If no requirement is found, the upload is rejected with a report of what was seen and how to fix the document</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>Project → Traceability</strong> (<code>/projects/:id</code>)</td>
+<td>Clicks <strong>Run Analysis</strong></td>
+<td>The first run loads the AI model (about 30–60 s). Then the headline numbers and the Coverage, Graph, Heatmap and Split views appear</td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>Explore the matrix</strong></td>
+<td>Switches views, rotates the 3D graph, clicks a requirement</td>
+<td>Its best endpoints and scores are shown</td>
+</tr>
+<tr>
+<td>9</td>
+<td><strong>Drift Analysis</strong></td>
+<td>Reviews the v1 → v2 drifts and clicks <strong>Explain</strong> on one</td>
+<td>The plain-English <em>what changed / why it breaks / how to fix</em> appears</td>
+</tr>
+<tr>
+<td>10</td>
+<td><strong>Benchmarks</strong></td>
+<td>Reads Precision, Recall, F1 and MAP</td>
+<td>Semantic model vs keyword baseline</td>
+</tr>
+<tr>
+<td>11</td>
+<td><strong>PR Bot</strong></td>
+<td><em>Simulated</em> tab: picks a scenario and clicks <strong>Run review</strong>. <em>Live reviews</em> tab: opens a real GitHub review</td>
+<td>Shows the verdict and the full bot comment</td>
+</tr>
+</tbody>
+</table>
+<h3 id="33-the-github-pull-request-flow">3.3 The GitHub pull-request flow</h3>
+<h4 id="one-time-setup-by-a-team-lead">One-time setup (by a team lead)</h4>
+<ol>
+<li><strong>Install the GitHub App</strong> &quot;Traceability Bot&quot; on the repository.</li>
+<li><strong>Commit a <code>.traceability.yml</code></strong>, for example:<pre class="hljs"><code><div><span class="hljs-attr">version:</span> <span class="hljs-number">1</span>
+<span class="hljs-attr">srs:</span> <span class="hljs-string">docs/SRS.docx</span>            <span class="hljs-comment"># Word, PDF or Markdown, diagrams included</span>
+<span class="hljs-attr">openapi:</span> <span class="hljs-string">openapi.yaml</span>
+<span class="hljs-attr">fail_on:</span> <span class="hljs-string">block</span>                <span class="hljs-comment"># block | critical | never</span>
+<span class="hljs-attr">srs_extraction:</span>
+  <span class="hljs-attr">diagram_mode:</span> <span class="hljs-string">vision</span>        <span class="hljs-comment"># read UML / flowcharts with the vision model</span>
+<span class="hljs-attr">code:</span>                         <span class="hljs-comment"># optional: AST scanning of Python code</span>
+  <span class="hljs-attr">paths:</span> [<span class="hljs-string">&quot;app/**/*.py&quot;</span>]
+</div></code></pre>
+</li>
+<li><strong>Turn on branch protection</strong> for <code>main</code> and mark <strong>&quot;Requirements Traceability&quot;</strong> as a required
+status check. A BLOCK now disables the merge button.</li>
+</ol>
+<h4 id="what-happens-on-every-pull-request">What happens on every pull request</h4>
+<pre><code class="language-mermaid"><div class="mermaid">sequenceDiagram
+    participant Dev as Developer
+    participant GH as GitHub
+    participant Bot as Traceability Bot
+    Dev->>GH: Open PR / push a commit ("Closes #12" in the description)
+    GH->>Bot: Signed webhook (pull_request)
+    Bot->>GH: Check run "Requirements Traceability": in progress
+    Bot->>GH: Read .traceability.yml, SRS (incl. diagrams), base + head spec, changed code, linked issue
+    Bot->>Bot: Diff endpoints & code symbols, score against requirements, check acceptance criteria
+    Bot->>GH: Complete check run: success / neutral / failure
+    Bot->>GH: Create or update the single PR comment
+    Bot->>Bot: Save the review (shown in "Live reviews")
+    GH-->>Dev: Merge allowed, allowed with warning, or blocked
+</div></code></pre>
+<p>How the developer interacts with the bot:</p>
+<ol>
+<li><strong>Open a pull request</strong> that changes the spec (or code under <code>code.paths</code>), and link the issue it
+solves with <code>Closes #12</code>, <code>Fixes #12</code> or <code>Resolves #12</code>.</li>
+<li><strong>Watch the check.</strong> Within seconds &quot;Requirements Traceability&quot; shows as <em>in progress</em>, then
+completes with ✅ <em>success</em>, ⚪ <em>neutral</em> or ❌ <em>failure</em>.</li>
+<li><strong>Read the comment.</strong> It lists every violation, the requirement and where it is defined in the SRS
+(including &quot;SRS Figure 2 · activity diagram&quot; for diagram requirements), the score drop, the
+severity and the AI explanation.</li>
+<li><strong>Fix and push.</strong> Each new push re-reviews the PR and <strong>updates the same comment</strong>. The
+<strong>Re-run</strong> button on the check repeats a review on demand.</li>
+<li><strong>Merge</strong> once the check passes (or is neutral, if your policy allows warnings).</li>
+</ol>
+<h4 id="when-you-get-pass-warn-or-block">When you get PASS, WARN or BLOCK</h4>
+<p>The verdict is <strong>deterministic</strong>: it comes from the scores and fixed thresholds, never from the LLM.</p>
+<table>
+<thead>
+<tr>
+<th>Verdict</th>
+<th>GitHub check</th>
+<th>When it happens</th>
+<th>Example (from our end-to-end test)</th>
+<th>Merge</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>✅ <strong>PASS</strong></td>
+<td><code>success</code></td>
+<td>No requirement lost alignment, <strong>and</strong> the linked issue's acceptance criteria are delivered (or no issue is linked)</td>
+<td>PR #101 adds an <em>optional</em> <code>discount_code</code> to add-to-cart. Every requirement keeps its score; the issue &quot;Support discount codes&quot; is delivered</td>
+<td>Allowed</td>
+</tr>
+<tr>
+<td>⚠️ <strong>WARN</strong></td>
+<td><code>neutral</code></td>
+<td>No requirement regressed, <strong>but</strong> the linked issue is only partly delivered (an acceptance criterion has no matching added or modified endpoint)</td>
+<td>PR #104 adds a wishlist endpoint, but the issue also asks for price-drop emails: <em>&quot;WARN: the linked issue is only partly delivered (50% covered)&quot;</em></td>
+<td>Allowed, with a visible warning</td>
+</tr>
+<tr>
+<td>🚫 <strong>BLOCK</strong></td>
+<td><code>failure</code></td>
+<td>At least one requirement <strong>regressed</strong>: an endpoint or code symbol that implements it lost meaningful alignment (see the rule below)</td>
+<td>PR #102 &quot;frictionless checkout&quot; drops the 2FA token from checkout → <strong>REQ-09</strong> regressed (0.617 → 0.560), a requirement that exists only as a UML diagram. PR #103 replaces the client <code>transaction_id</code> with a server reference → <strong>REQ-04</strong> regressed</td>
+<td>Blocked (with branch protection)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The regression rule (BLOCK).</strong> For each endpoint or code symbol the PR modifies or removes, the bot
+re-scores it against the requirements it implements (its top-3 trace links in the base version):</p>
+<ul>
+<li>the link was <strong>strong</strong> (score ≥ 0.60) and dropped by <strong>0.05</strong> or more, or</li>
+<li>the link was <strong>medium</strong> (score ≥ 0.35) and dropped by <strong>0.08</strong> or more.</li>
+</ul>
+<p>Each violation also gets a <strong>severity</strong> (Minor, Major or Critical) from the size of the drop. All
+thresholds can be changed in <code>.traceability.yml</code>.</p>
+<p><strong>Policy (<code>fail_on</code>).</strong> <code>block</code> (default) fails the check on any BLOCK. <code>critical</code> fails only on
+Critical drift, which suits a <code>main</code>-branch deploy gate. <code>never</code> is advisory mode: the bot comments
+but never fails.</p>
+<p><strong>Other outcomes you may see:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Outcome</th>
+<th>Check</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><em>Skipped: no <code>.traceability.yml</code></em></td>
+<td><code>neutral</code></td>
+<td>The repository is not configured yet</td>
+</tr>
+<tr>
+<td><em>Skipped: no specification change</em></td>
+<td><code>neutral</code></td>
+<td>The PR does not touch the SRS, the spec, the config or the watched code</td>
+</tr>
+<tr>
+<td><em>Error: SRS not found / invalid OpenAPI spec / could not read the SRS</em></td>
+<td><code>failure</code></td>
+<td>The configured file is missing or broken. The message says which file and why; fix it and press <strong>Re-run</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="34-the-same-flow-without-a-server-github-action">3.4 The same flow without a server (GitHub Action)</h3>
+<p>Teams that do not want to host the App add the Action to a workflow:</p>
+<pre class="hljs"><code><div><span class="hljs-bullet">-</span> <span class="hljs-attr">uses:</span> <span class="hljs-string">raghavvag/&lt;repo&gt;@v1</span>
+  <span class="hljs-attr">with:</span> { <span class="hljs-attr">config:</span> <span class="hljs-string">.traceability.yml</span>, <span class="hljs-attr">fail-on:</span> <span class="hljs-string">block</span> }
+</div></code></pre>
+<p>The job runs the same engine on GitHub's runners and writes the report to the job summary. A BLOCK
+fails the job, which blocks the merge when the job is a required check. The App and the Action always
+agree, because they share one review engine.</p>
+
+</body>
+</html>

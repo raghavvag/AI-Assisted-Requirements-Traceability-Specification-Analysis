@@ -1,0 +1,669 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Nexus E-Commerce Platform API (breaking release)",
+    "description": "Complete REST API specification for the Nexus E-Commerce Platform. This specification is the v1.0 baseline \u2014 fully compliant with all 10 requirements in the SRS.",
+    "version": "3.0.0",
+    "contact": {
+      "name": "Nexus Engineering Team",
+      "email": "api@nexus-ecommerce.example.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.nexus-ecommerce.example.com",
+      "description": "Production server"
+    }
+  ],
+  "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "summary": "Log in",
+        "description": "Checks the username and password and returns a success flag. Sessions are not tracked.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login result with a boolean success flag"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "authLogout",
+        "summary": "Revoke authenticated session and invalidate JWT token",
+        "description": "Invalidates the current JWT session token using the provided session_id. Ensures the session is removed from the active session registry, supporting secure logout and session audit trail integrity. Satisfies REQ-01.",
+        "tags": [
+          "Authentication"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_id"
+                ],
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "description": "The unique session identifier to revoke"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session successfully revoked. The JWT token is invalidated and the session_id is removed from the active session registry."
+          }
+        }
+      }
+    },
+    "/api/v1/products": {
+      "get": {
+        "operationId": "listProducts",
+        "summary": "Retrieve paginated product catalogue with filtering",
+        "description": "Returns the full product catalogue with support for keyword search, category filtering, and price range filtering. Each product record includes product_id, name, description, category, price, stock_quantity, and image_url. Accepts pagination parameters (page and page_size) to control result volume. Satisfies REQ-02: Product Catalogue Retrieval.",
+        "tags": [
+          "Products"
+        ],
+        "parameters": [
+          {
+            "name": "keyword",
+            "in": "query",
+            "description": "Keyword-based text filter applied to product name and description",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "description": "Filter products by category name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_price",
+            "in": "query",
+            "description": "Minimum price filter (inclusive)",
+            "schema": {
+              "type": "number",
+              "format": "float"
+            }
+          },
+          {
+            "name": "max_price",
+            "in": "query",
+            "description": "Maximum price filter (inclusive)",
+            "schema": {
+              "type": "number",
+              "format": "float"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Pagination: page number (1-indexed)",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Pagination: number of records per page",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of product records. Each record includes product_id, name, description, category, price, stock_quantity, and image_url.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "products": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "product_id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "price": {
+                            "type": "number"
+                          },
+                          "stock_quantity": {
+                            "type": "integer"
+                          },
+                          "image_url": {
+                            "type": "string",
+                            "format": "uri"
+                          }
+                        }
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "page_size": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{product_id}": {
+      "get": {
+        "operationId": "getProduct",
+        "summary": "Retrieve a single product by ID",
+        "description": "Returns the full product record for a specific product_id, including product_id, name, description, category, price, stock_quantity, and image_url. Satisfies REQ-02: Product Catalogue Retrieval.",
+        "tags": [
+          "Products"
+        ],
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "description": "Unique identifier of the product to retrieve",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full product record including product_id, name, description, category, price, stock_quantity, and image_url."
+          },
+          "404": {
+            "description": "Product not found"
+          }
+        }
+      }
+    },
+    "/api/v1/cart": {
+      "get": {
+        "operationId": "getCart",
+        "summary": "Retrieve current user's shopping cart",
+        "description": "Returns the authenticated user's persistent shopping cart state, including all cart items with their item_id, product_id, quantity, unit_price, and the server-computed subtotal. Cart state persists across user sessions. Satisfies REQ-03: Shopping Cart Management.",
+        "tags": [
+          "Cart"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current cart state with all items (item_id, product_id, quantity, unit_price) and the computed subtotal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cart_id": {
+                      "type": "string"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "item_id": {
+                            "type": "string"
+                          },
+                          "product_id": {
+                            "type": "string"
+                          },
+                          "quantity": {
+                            "type": "integer"
+                          },
+                          "unit_price": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    },
+                    "subtotal": {
+                      "type": "number",
+                      "description": "Server-computed cart subtotal"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cart/items": {
+      "post": {
+        "operationId": "addCartItem",
+        "summary": "Add item to shopping cart",
+        "description": "Adds a product to the authenticated user's persistent shopping cart. Returns the updated cart state with the new item's item_id, product_id, quantity, unit_price, and the updated subtotal. Satisfies REQ-03: Shopping Cart Management.",
+        "tags": [
+          "Cart"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "product_id",
+                  "quantity"
+                ],
+                "properties": {
+                  "product_id": {
+                    "type": "string"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Item added. Returns updated cart state with item_id, product_id, quantity, unit_price, and updated subtotal."
+          }
+        }
+      }
+    },
+    "/api/v1/cart/items/{item_id}": {
+      "put": {
+        "operationId": "updateCartItem",
+        "summary": "Update cart item quantity",
+        "description": "Updates the quantity of an existing item in the authenticated user's shopping cart. Returns the updated cart state with the revised quantity and recomputed subtotal. Satisfies REQ-03: Shopping Cart Management.",
+        "tags": [
+          "Cart"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "description": "Unique cart item identifier",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "quantity"
+                ],
+                "properties": {
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated cart state with revised item quantity and recomputed subtotal."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeCartItem",
+        "summary": "Remove item from shopping cart",
+        "description": "Removes a specific item from the authenticated user's shopping cart. Returns the updated cart state with the item removed and the subtotal recomputed. Satisfies REQ-03: Shopping Cart Management.",
+        "tags": [
+          "Cart"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "description": "Unique cart item identifier to remove",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Item removed. Returns updated cart state with the item removed and the subtotal recomputed."
+          }
+        }
+      }
+    },
+    "/api/v1/refund": {
+      "post": {
+        "summary": "Process a refund and obtain a server-generated refund confirmation",
+        "description": "Initiates a refund for a completed order. The server auto-generates a unique refund_reference for internal tracking. No caller-supplied idempotency key is accepted or required.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "order_id": {
+                    "type": "string",
+                    "description": "The order to refund"
+                  },
+                  "refund_amount": {
+                    "type": "string",
+                    "description": "Amount to refund"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "Reason for the refund"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Refund processed. Returns a server-generated refund_reference."
+          }
+        }
+      }
+    },
+    "/api/v1/checkout": {
+      "post": {
+        "summary": "Submit checkout and place a new order",
+        "description": "Accepts a checkout payload with shipping_address, delivery_method, payment_method_token and optional currency_code. All orders are processed directly without any step-up authentication or secondary verification challenge, regardless of order value.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shipping_address": {
+                    "type": "string",
+                    "description": "Validated shipping address object"
+                  },
+                  "delivery_method": {
+                    "type": "string",
+                    "description": "Selected delivery method"
+                  },
+                  "payment_method_token": {
+                    "type": "string",
+                    "description": "Token representing the selected payment method"
+                  },
+                  "currency_code": {
+                    "type": "string",
+                    "description": "Optional ISO 4217 currency code"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Order placed successfully. Returns order_id and estimated_delivery_date."
+          }
+        }
+      }
+    },
+    "/api/v1/payments/methods": {
+      "get": {
+        "operationId": "listPaymentMethods",
+        "summary": "List all supported and saved payment methods for the user",
+        "description": "Returns the authenticated user's available payment methods including credit/debit cards, digital wallet options (Apple Pay and Google Pay), and any saved payment instruments. Satisfies REQ-06: Payment Method Support.",
+        "tags": [
+          "Payments"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of payment methods available to the user, including card_token options, Apple Pay, Google Pay, and saved_payment_id references."
+          }
+        }
+      }
+    },
+    "/api/v1/payments/process": {
+      "post": {
+        "summary": "Process a card payment",
+        "description": "Charges a card for an order. Only card payments are accepted; wallet payments and stored instruments are no longer supported.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "order_id",
+                  "card_number",
+                  "expiry",
+                  "cvv"
+                ],
+                "properties": {
+                  "order_id": {
+                    "type": "string"
+                  },
+                  "card_number": {
+                    "type": "string"
+                  },
+                  "expiry": {
+                    "type": "string"
+                  },
+                  "cvv": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment captured"
+          }
+        }
+      }
+    },
+    "/api/v1/users/profile": {
+      "get": {
+        "operationId": "getUserProfile",
+        "summary": "Retrieve authenticated user profile",
+        "description": "Returns the authenticated user's profile including display_name, email, shipping_addresses array, and notification_preferences. Satisfies REQ-08: User Profile Management.",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User profile with display_name, email, shipping_addresses, and notification_preferences.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user_id": {
+                      "type": "string"
+                    },
+                    "display_name": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "shipping_addresses": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "notification_preferences": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateUserProfile",
+        "summary": "Update user profile information",
+        "description": "Updates the authenticated user's profile fields including display_name, email, shipping_addresses, and notification_preferences. If email is changed, the response sets email_verification_pending to true, indicating a re-verification workflow has been triggered. Satisfies REQ-08: User Profile Management.",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "display_name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "shipping_addresses": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "notification_preferences": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated. If email was changed, email_verification_pending is true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "display_name": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "email_verification_pending": {
+                      "type": "boolean",
+                      "description": "True if email was changed and re-verification is required"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  }
+}

@@ -1,8 +1,10 @@
 """
 src/srs/extractor.py — Orchestration
 ====================================
-    file -> reader (docx | pdf | md/txt) -> blocks -> noise filter
-         -> Table / Tagged / Shall strategies -> normaliser -> requirements + report
+    file -> reader (docx | pdf | md/txt) -> blocks -> captions -> noise filter
+         -> figure interpretation (src/srs/diagrams.py)
+         -> Table / Tagged / Shall / Diagram strategies -> normaliser
+         -> requirements + report
 """
 
 from __future__ import annotations
@@ -12,9 +14,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from src.srs.blocks import Block
+from src.srs.diagrams import DiagramStrategy, attach_captions, interpret_figures
 from src.srs.errors import NoRequirementsFoundError, UnsupportedFormatError
 from src.srs.noise import filter_blocks
-from src.srs.normalise import classify_type, finalize
+from src.srs.normalise import canonical_id, classify_type, finalize
 from src.srs.options import ExtractionOptions
 from src.srs.readers.docx_reader import read_docx
 from src.srs.readers.markdown_reader import LEGACY_PATTERN, legacy_extract, read_markdown, read_text_file
@@ -68,9 +71,11 @@ def extract_from_blocks(
     source_file: str = "",
     source_format: str = "",
 ) -> List[Requirement]:
-    """Run noise filtering + strategies + normalisation on a block stream."""
+    """Run noise filtering + figure interpretation + strategies + normalisation
+    on a block stream."""
     report.n_blocks = report.n_blocks or len(blocks)
-    clean = filter_blocks(blocks, options, report)
+    clean = filter_blocks(attach_captions(blocks), options, report)
+    clean = interpret_figures(clean, options, report)
     ctx = SectionContext(clean)
     tags = TagMatcher(options.effective_id_pattern)
 
@@ -79,9 +84,12 @@ def extract_from_blocks(
     candidates += TaggedStrategy(tags, tables).extract(clean, ctx, report, consumed)
     if not candidates:
         candidates = ShallStatementStrategy().extract(clean, ctx, report)
+    from_figures, figure_refs = DiagramStrategy(tags).extract(
+        clean, ctx, report, {canonical_id(c.raw_id) for c in candidates})
+    candidates += from_figures
 
     reqs = finalize(candidates, source_file=source_file, source_format=source_format,
-                    options=options, report=report)
+                    options=options, report=report, figure_refs=figure_refs)
     # Strategy counts after de-duplication, so they add up to n_requirements.
     report.by_strategy.clear()
     for r in reqs:

@@ -8,6 +8,9 @@ they are written and tested once, independent of the file format.
     Heading(level, text)              a section title; level 0 = document title
     Paragraph(text, style, is_list)   a run of body text / one list item
     Table(rows)                       a grid of cell strings (merged cells resolved)
+    Figure(image, alt_text, caption)  an embedded picture (UML diagram, flowchart,
+                                      architecture drawing); src/srs/diagrams.py
+                                      reads requirements out of it
 
 Each block carries a Locator so every extracted requirement can be traced back
 to "table 2 / row 5" or "page 4 / paragraph 31" in the source document.
@@ -24,6 +27,7 @@ class BlockKind(str, Enum):
     HEADING = "heading"
     PARAGRAPH = "paragraph"
     TABLE = "table"
+    FIGURE = "figure"
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,7 @@ class Locator:
             BlockKind.HEADING: "heading",
             BlockKind.PARAGRAPH: "paragraph",
             BlockKind.TABLE: "table",
+            BlockKind.FIGURE: "figure",
         }[self.kind]
         parts = []
         if self.page is not None:
@@ -119,7 +124,46 @@ class Table:
             yield i, row
 
 
-Block = Union[Heading, Paragraph, Table]
+@dataclass(frozen=True)
+class DiagramStatement:
+    """One behaviour a figure specifies, as a requirement sentence. `req_id` is
+    the requirement ID printed in the figure (or its caption), if any."""
+
+    text: str
+    req_id: str = ""
+    title: str = ""
+
+
+@dataclass(frozen=True)
+class DiagramReading:
+    """What a diagram interpreter read from a figure (src/srs/diagrams.py).
+
+    `engine` names the source, e.g. "vision:gpt-4o-mini", "ocr:tesseract",
+    "alt_text". `summary` is context only and is never embedded."""
+
+    engine: str
+    diagram_type: str = "other"
+    summary: str = ""
+    statements: Tuple[DiagramStatement, ...] = ()
+
+
+@dataclass(frozen=True)
+class Figure:
+    """An embedded image. Readers fill `image` (raw bytes as stored in the
+    document) and `alt_text`; the extractor pairs the `caption` and an
+    interpreter fills `reading`."""
+
+    locator: Locator
+    image: bytes = field(repr=False)
+    content_type: str = ""
+    alt_text: str = ""
+    caption: str = ""
+    reading: Optional[DiagramReading] = None
+
+    kind: BlockKind = field(default=BlockKind.FIGURE, init=False, repr=False)
+
+
+Block = Union[Heading, Paragraph, Table, Figure]
 
 
 class LocatorFactory:

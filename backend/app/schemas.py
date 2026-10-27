@@ -99,6 +99,7 @@ class ExtractedRequirement(BaseModel):
     origin: Optional[str] = None
     strategy: Optional[str] = None
     source: Optional[RequirementSource] = None
+    figures: Optional[List[Dict[str, Any]]] = None     # diagrams that produced / illustrate it
 
 
 class ExtractionReportOut(BaseModel):
@@ -110,6 +111,7 @@ class ExtractionReportOut(BaseModel):
     skipped: Dict[str, int] = {}
     duplicates: List[str] = []
     warnings: List[str] = []
+    figures: List[Dict[str, Any]] = []
 
 
 class ExtractionSummary(BaseModel):
@@ -120,6 +122,7 @@ class ExtractionSummary(BaseModel):
     n_warnings: int = 0
     warnings: List[str] = []
     requirement_ids: List[str] = []
+    n_figures: int = 0
 
 
 class DocumentUploadOut(DocumentOut):
@@ -216,6 +219,7 @@ class PRViolation(BaseModel):
     severity: str
     endpoint_change_description: str = ""
     explanation: str = ""
+    requirement_source: str = ""             # "SRS Figure 2: ... · activity diagram" for diagram requirements
 
 
 class PRReviewResponse(BaseModel):

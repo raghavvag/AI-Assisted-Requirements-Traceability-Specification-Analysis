@@ -16,6 +16,8 @@ canonical ID.
                             ("see REQ-02") never start a requirement.
   3. ShallStatementStrategy fallback for SRS documents without IDs: every
                             shall/must sentence inside a requirements section.
+  4. DiagramStrategy        (src/srs/diagrams.py) requirements read out of
+                            figures: UML, flowcharts, architecture diagrams.
 """
 
 from __future__ import annotations
@@ -31,7 +33,8 @@ from src.srs.report import ExtractionReport
 STRATEGY_TABLE = "table"
 STRATEGY_TAGGED = "tagged"
 STRATEGY_SHALL = "shall_statement"
-STRATEGY_PRIORITY = {STRATEGY_TABLE: 0, STRATEGY_TAGGED: 1, STRATEGY_SHALL: 2}
+STRATEGY_DIAGRAM = "diagram"
+STRATEGY_PRIORITY = {STRATEGY_TABLE: 0, STRATEGY_TAGGED: 1, STRATEGY_SHALL: 2, STRATEGY_DIAGRAM: 3}
 
 # Metadata keys a strategy may fill.
 META_PRIORITY = "priority"

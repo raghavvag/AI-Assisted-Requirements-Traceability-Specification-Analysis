@@ -52,3 +52,27 @@ class FakeExplainer:
     def explain_drift(self, pair, v1_text, v2_text):
         self.calls.append(pair["requirement_id"])
         return f"explained {pair['requirement_id']}"
+
+
+class FakeVisionClient:
+    """Stands in for openai.OpenAI in src/srs/diagrams.py: returns `payload`
+    (a dict, or a callable(kwargs) -> dict) as the model's JSON answer and
+    records every call. `error` makes the call raise instead."""
+
+    def __init__(self, payload=None, error=None):
+        self.payload = payload if payload is not None else {"diagram_type": "other", "requirements": []}
+        self.error = error
+        self.calls = []
+        self.chat = self
+        self.completions = self
+
+    def create(self, **kwargs):
+        import json
+        from types import SimpleNamespace
+
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        payload = self.payload(kwargs) if callable(self.payload) else self.payload
+        message = SimpleNamespace(content=json.dumps(payload))
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])

@@ -16,7 +16,12 @@ is rebuilt from layout:
   * paragraphs  consecutive lines are joined; a new paragraph starts on a
                 vertical gap, a bullet, a requirement tag, or a bold/regular
                 switch. A line ending in "-" is joined without a space.
-  * scanned     no text layer at all -> ScannedPdfError (OCR is out of scope).
+  * figures     raster images of at least MIN_FIGURE_PT x MIN_FIGURE_PT points
+                are cropped, rendered to PNG and emitted as Figure blocks in
+                reading order; src/srs/diagrams.py reads them. Vector drawings
+                have no image object: their labels are ordinary text lines.
+  * scanned     no text layer at all -> ScannedPdfError (whole-page OCR is
+                out of scope).
 """
 
 from __future__ import annotations
@@ -29,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-from src.srs.blocks import Block, BlockKind, Heading, LocatorFactory, Paragraph, Table
+from src.srs.blocks import Block, BlockKind, Figure, Heading, LocatorFactory, Paragraph, Table
 from src.srs.errors import InvalidDocumentError, ScannedPdfError
 from src.srs.noise import clean_text
 from src.srs.report import ExtractionReport
@@ -39,6 +44,8 @@ logger = logging.getLogger(__name__)
 MARGIN_FRACTION = 0.08
 HEADING_SIZE_RATIO = 1.15
 PARAGRAPH_GAP_RATIO = 1.45
+MIN_FIGURE_PT = 72            # 1 inch; smaller images are icons, logos, bullets
+FIGURE_DPI = 150
 
 _PAGE_NUMBER = re.compile(r"^\s*(?:page\s+)?\d{1,4}(?:\s*(?:of|/)\s*\d{1,4})?\s*$", re.IGNORECASE)
 _NUMBERED = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+\S")
@@ -55,6 +62,12 @@ class _Line:
     bold: bool
     page: int
     in_margin: bool = False
+
+
+@dataclass
+class _FigureItem:
+    png: bytes
+    page: int
 
 
 def read_pdf(
@@ -99,6 +112,8 @@ def read_pdf(
                     rows = t.extract()
                     if rows:
                         items.append((float(t.bbox[1]), [[c or "" for c in r] for r in rows]))
+                for top, png in _page_figures(page, report):
+                    items.append((top, _FigureItem(png, pno)))
                 items.sort(key=lambda it: it[0])
                 page_items.append((pno, items))
         except PdfminerException as exc:
@@ -121,7 +136,9 @@ def read_pdf(
     for pno, items in page_items:
         builder.start_page(pno)
         for _, item in items:
-            if isinstance(item, _Line):
+            if isinstance(item, _FigureItem):
+                builder.add_figure(item)
+            elif isinstance(item, _Line):
                 if item.in_margin and _margin_key(item.text) in drop:
                     report.skip("running_header_footer")
                     continue
@@ -137,6 +154,31 @@ def read_pdf(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _page_figures(page: Any, report: ExtractionReport) -> List[Tuple[float, bytes]]:
+    """(top, PNG bytes) for every raster image on the page that is big enough to
+    be a diagram. The region is rendered rather than the raw stream decoded, so
+    masks, colour spaces and rotation come out as they look on the page."""
+    import io
+
+    out: List[Tuple[float, bytes]] = []
+    for img in page.images:
+        x0, top = max(0.0, float(img["x0"])), max(0.0, float(img["top"]))
+        x1, bottom = min(float(page.width), float(img["x1"])), min(float(page.height), float(img["bottom"]))
+        if x1 - x0 < MIN_FIGURE_PT or bottom - top < MIN_FIGURE_PT:
+            report.skip("image_too_small")
+            continue
+        try:
+            rendered = page.crop((x0, top, x1, bottom)).to_image(resolution=FIGURE_DPI).original
+            buf = io.BytesIO()
+            rendered.convert("RGB").save(buf, format="PNG")
+        except Exception as exc:  # noqa: BLE001 — a broken image must not fail the whole document
+            logger.warning("Could not render image on page %s: %s", page.page_number, exc)
+            report.skip("image_unreadable")
+            continue
+        out.append((top, buf.getvalue()))
+    return out
+
 
 def _inside(obj: Dict[str, Any], boxes: Sequence[Tuple[float, float, float, float]]) -> bool:
     cx = (float(obj["x0"]) + float(obj["x1"])) / 2
@@ -264,6 +306,11 @@ class _BlockBuilder:
             self.nothing_on_page_yet = False
             return
         self._emit(Table(rows=cleaned, locator=self.loc.next(BlockKind.TABLE, self.page)))
+
+    def add_figure(self, item: "_FigureItem") -> None:
+        self._flush()
+        self._emit(Figure(locator=self.loc.next(BlockKind.FIGURE, item.page), image=item.png,
+                          content_type="image/png"))
 
     def _emit(self, block: Block) -> None:
         self.blocks.append(block)

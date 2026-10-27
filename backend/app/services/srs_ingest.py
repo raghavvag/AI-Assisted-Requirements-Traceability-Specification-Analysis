@@ -142,6 +142,7 @@ def summary_of(reqs: List[Dict[str, Any]], report: Dict[str, Any]) -> Dict[str, 
         "n_warnings": len(report.get("warnings", [])),
         "warnings": report.get("warnings", [])[:5],
         "requirement_ids": [str(r["id"]) for r in reqs],
+        "n_figures": len(report.get("figures", [])),
     }
 
 
